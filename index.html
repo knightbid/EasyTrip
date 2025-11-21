@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="vi">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chia Tiền Đi Chơi</title>
+    <title>Chia Tiền Đi Chơi (TripSplit AI)</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -13,24 +15,813 @@
               primary: '#4F46E5',
               secondary: '#10B981',
               danger: '#EF4444',
+            },
+            animation: {
+              'fade-in-down': 'fadeInDown 0.3s ease-out',
+              'fade-in-up': 'fadeInUp 0.3s ease-out',
+            },
+            keyframes: {
+              fadeInDown: {
+                '0%': { opacity: '0', transform: 'translateY(-10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
+              fadeInUp: {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              },
             }
           }
         }
       }
     </script>
-  <script type="importmap">
+
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Import Map for Google GenAI -->
+    <script type="importmap">
 {
   "imports": {
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
   }
 }
 </script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
 </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
-    <div id="root"></div>
-  </body>
+<body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
+
+    <div id="app" class="flex-1">
+        <!-- App Content will be injected here -->
+    </div>
+
+    <!-- Modals Container -->
+    <div id="modal-container"></div>
+
+    <script type="module">
+        import { GoogleGenAI, Type } from "@google/genai";
+
+        // --- CONFIG & UTILS ---
+        // Note: In a real deployment, this should be handled via build process. 
+        // For this standalone HTML, we assume API_KEY is injected or user provides it.
+        const API_KEY = typeof process !== 'undefined' && process.env ? process.env.API_KEY : ''; 
+
+        const formatCurrency = (amount) => {
+            return new Intl.NumberFormat('vi-VN', {
+                style: 'currency',
+                currency: 'VND',
+            }).format(amount);
+        };
+
+        const generateId = () => Math.random().toString(36).substring(2, 9);
+
+        const getRandomImage = (width, height, seed) => {
+            return `https://picsum.photos/seed/${seed}/${width}/${height}`;
+        };
+
+        // Unicode-safe Base64 Encode
+        const encodeData = (data) => {
+            try {
+                return btoa(encodeURIComponent(JSON.stringify(data)).replace(/%([0-9A-F]{2})/g,
+                    function toSolidBytes(match, p1) {
+                        return String.fromCharCode(parseInt(p1, 16));
+                    }));
+            } catch (e) { console.error(e); return ""; }
+        };
+
+        // Unicode-safe Base64 Decode
+        const decodeData = (str) => {
+            try {
+                return JSON.parse(decodeURIComponent(atob(str).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join('')));
+            } catch (e) { console.error(e); return null; }
+        };
+
+        // --- STATE MANAGEMENT ---
+        const STORAGE_KEY = 'trip_split_data_js';
+        
+        const store = {
+            trips: [],
+            activeTripId: null,
+            isReadOnly: false,
+            activeTab: 'expenses', // 'expenses', 'balances', 'members', 'report'
+            
+            // UI State
+            editingExpenseId: null, // ID of expense being edited
+            expenseModalOpen: false,
+            
+            // Data Form State (Temporary)
+            newTripName: '',
+            newMemberName: '',
+            quickAddText: '',
+            isAnalyzing: false,
+            
+            // Expense Form State
+            expenseForm: {
+                desc: '',
+                amount: '',
+                payerId: '',
+                involvedIds: []
+            }
+        };
+
+        // Load Data
+        const initStore = () => {
+            // Check Hash for Share
+            const hash = window.location.hash;
+            if (hash.startsWith('#share=')) {
+                const encoded = hash.substring(7);
+                const sharedTrip = decodeData(encoded);
+                if (sharedTrip && sharedTrip.id) {
+                    store.trips = [sharedTrip]; // In share mode, maybe just show this one or add to existing
+                    // Try to merge with local if exists, or just push
+                    const local = localStorage.getItem(STORAGE_KEY);
+                    if(local) {
+                        const localTrips = JSON.parse(local);
+                        if (!localTrips.some(t => t.id === sharedTrip.id)) {
+                            store.trips = [...localTrips, sharedTrip];
+                        } else {
+                            store.trips = localTrips;
+                        }
+                    }
+                    
+                    store.activeTripId = sharedTrip.id;
+                    store.isReadOnly = true;
+                    window.history.pushState("", document.title, window.location.pathname); // Clean URL
+                    saveStore();
+                    return;
+                }
+            }
+
+            // Load Local Storage
+            const local = localStorage.getItem(STORAGE_KEY);
+            if (local) {
+                try {
+                    store.trips = JSON.parse(local);
+                } catch (e) { console.error(e); }
+            }
+        };
+
+        const saveStore = () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(store.trips));
+            render();
+        };
+
+        // --- GEMINI SERVICE ---
+        const parseExpenseWithAI = async (text, memberNames) => {
+            if (!API_KEY) {
+                alert("Chưa cấu hình API Key!");
+                return null;
+            }
+            
+            try {
+                const ai = new GoogleGenAI({ apiKey: API_KEY });
+                const prompt = `
+                  Phân tích chi tiêu từ văn bản tiếng Việt sau: "${text}".
+                  Danh sách thành viên hiện có: ${memberNames.join(", ")}.
+                  Nếu tên người trả không có trong danh sách, hãy chọn người có tên gần giống nhất hoặc để trống.
+                  Amount phải là số nguyên (VND).
+                `;
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-2.5-flash",
+                    contents: prompt,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: Type.OBJECT,
+                            properties: {
+                                description: { type: Type.STRING },
+                                amount: { type: Type.NUMBER },
+                                payerName: { type: Type.STRING },
+                            },
+                            required: ["description", "amount", "payerName"],
+                        },
+                    },
+                });
+
+                return JSON.parse(response.text);
+            } catch (e) {
+                console.error("AI Error", e);
+                alert("Lỗi khi phân tích AI: " + e.message);
+                return null;
+            }
+        };
+
+        // --- RENDER COMPONENTS ---
+        const app = document.getElementById('app');
+        const modalContainer = document.getElementById('modal-container');
+
+        // 1. Trip List View
+        const renderTripList = () => {
+            const tripsHtml = store.trips.length === 0 
+                ? `<div class="text-center py-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 col-span-full">
+                    <p class="text-gray-500 text-lg mb-4">Chưa có chuyến đi nào.</p>
+                    <button data-action="toggle-create-form" class="text-indigo-600 font-medium hover:underline">Tạo chuyến đi đầu tiên ngay!</button>
+                   </div>`
+                : store.trips.map(trip => `
+                    <div class="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden border border-gray-200 flex flex-col h-full">
+                        <div class="relative h-40 overflow-hidden cursor-pointer" data-action="select-trip" data-id="${trip.id}">
+                            <img src="${trip.coverImage}" alt="${trip.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                            <h3 class="absolute bottom-3 left-4 text-xl font-bold text-white shadow-black/50 drop-shadow-md">${trip.name}</h3>
+                        </div>
+                        <div class="p-4 flex-1 flex flex-col">
+                            <div class="flex items-center text-gray-500 text-sm mb-2">
+                                <i data-lucide="calendar" class="w-4 h-4 mr-2"></i> ${new Date(trip.startDate).toLocaleDateString('vi-VN')}
+                            </div>
+                            <div class="flex items-center text-gray-500 text-sm mb-4">
+                                <i data-lucide="users" class="w-4 h-4 mr-2"></i> ${trip.members.length} thành viên
+                            </div>
+                            <div class="mt-auto flex justify-between items-center pt-4 border-t border-gray-100">
+                                <button data-action="select-trip" data-id="${trip.id}" class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1 rounded text-xs font-medium transition-colors">Xem Chi Tiết</button>
+                                <button data-action="delete-trip" data-id="${trip.id}" class="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+            return `
+                <div class="container mx-auto px-4 py-8 max-w-5xl">
+                    <div class="flex justify-between items-center mb-8">
+                        <h1 class="text-3xl font-bold text-gray-900">Chuyến Đi Của Bạn</h1>
+                        <button data-action="toggle-create-form" class="bg-indigo-600 text-white px-4 py-2 rounded-md flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-sm">
+                            <i data-lucide="plus" class="w-5 h-5"></i> Tạo Chuyến Đi
+                        </button>
+                    </div>
+
+                    <!-- Create Form (Hidden logic handled by simple inline toggle for simplicity or state) -->
+                    <div id="create-trip-form" class="${store.isCreating ? 'block' : 'hidden'} mb-8 bg-white p-6 rounded-lg shadow-md border border-indigo-100 animate-fade-in-down">
+                        <form data-action="submit-create-trip" class="flex flex-col sm:flex-row gap-4">
+                            <input type="text" id="new-trip-input" value="${store.newTripName}" placeholder="Tên chuyến đi (VD: Đà Lạt 2024)" class="flex-1 rounded-md border border-gray-300 p-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm" />
+                            <div class="flex gap-2">
+                                <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">Lưu</button>
+                                <button type="button" data-action="cancel-create" class="bg-white text-gray-700 border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50">Hủy</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${tripsHtml}
+                    </div>
+                </div>
+            `;
+        };
+
+        // 2. Trip Detail View
+        const renderTripDetail = () => {
+            const trip = store.trips.find(t => t.id === store.activeTripId);
+            if (!trip) return '';
+
+            // Calcs
+            const totalSpent = trip.expenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            // Calculate Stats
+            const memberStats = trip.members.map(m => {
+                let paid = 0;
+                let consumed = 0;
+                trip.expenses.forEach(e => {
+                    if (e.payerId === m.id) paid += e.amount;
+                    const involved = e.involvedMemberIds && e.involvedMemberIds.length > 0 ? e.involvedMemberIds : trip.members.map(mem => mem.id);
+                    if (involved.includes(m.id)) {
+                        consumed += e.amount / involved.length;
+                    }
+                });
+                return { ...m, paid, consumed, balance: paid - consumed };
+            }).sort((a, b) => a.balance - b.balance);
+
+            // --- Sub-renders for Tabs ---
+            const renderExpensesTab = () => {
+                const list = trip.expenses.length === 0 
+                    ? `<div class="text-center py-12 text-gray-400"><i data-lucide="receipt" class="w-12 h-12 mx-auto mb-2 opacity-20"></i><p>Chưa có khoản chi nào.</p></div>`
+                    : trip.expenses.map(e => {
+                        const payer = trip.members.find(m => m.id === e.payerId)?.name || 'Unknown';
+                        const count = e.involvedMemberIds?.length || trip.members.length;
+                        const isAll = count === trip.members.length;
+                        
+                        return `
+                        <div class="flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg border border-gray-100 transition-colors group">
+                            <div class="flex items-start gap-3 flex-1 ${!store.isReadOnly ? 'cursor-pointer' : ''}" data-action="${!store.isReadOnly ? 'edit-expense' : ''}" data-id="${e.id}">
+                                <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600 mt-1"><i data-lucide="receipt" class="w-5 h-5"></i></div>
+                                <div>
+                                    <h4 class="font-semibold text-gray-900">${e.description}</h4>
+                                    <p class="text-sm text-gray-500">
+                                        <span class="font-medium text-gray-700">${payer}</span> đã trả • 
+                                        <span class="text-gray-400 italic ml-1">${isAll ? 'Cho tất cả' : `Cho ${count} người`}</span>
+                                    </p>
+                                    <p class="text-xs text-gray-400 mt-1">${new Date(e.date).toLocaleDateString('vi-VN')}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="font-bold text-gray-900">${formatCurrency(e.amount)}</span>
+                                ${!store.isReadOnly ? `
+                                    <button data-action="edit-expense" data-id="${e.id}" class="text-gray-400 hover:text-indigo-500 p-2 rounded-full hover:bg-indigo-50"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                                    <button data-action="delete-expense" data-id="${e.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                ` : ''}
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                const quickAdd = !store.isReadOnly && trip.members.length > 0 ? `
+                    <div class="mb-8">
+                        <div class="relative">
+                            <input type="text" id="quick-add-input" value="${store.quickAddText}" placeholder='Nhập nhanh: "Ăn tối 500k Hùng trả" ...' 
+                                class="w-full pl-4 pr-32 py-3 rounded-full border border-gray-300 shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" 
+                                ${store.isAnalyzing ? 'disabled' : ''}
+                            />
+                            <div class="absolute right-1 top-1 bottom-1 flex items-center gap-1">
+                                <button data-action="ai-quick-add" class="rounded-full h-full px-4 bg-gradient-to-r from-indigo-600 to-purple-600 border-none text-white flex items-center justify-center disabled:opacity-50">
+                                    ${store.isAnalyzing ? '<i data-lucide="loader-2" class="animate-spin w-4 h-4"></i>' : '<i data-lucide="sparkles" class="w-4 h-4"></i>'}
+                                </button>
+                                <button data-action="open-expense-modal" class="rounded-full h-full w-10 p-0 flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200">
+                                    <i data-lucide="plus" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        </div>
+                        ${!API_KEY ? '<p class="text-xs text-red-400 mt-1 ml-4">Cần cấu hình API Key để dùng tính năng AI.</p>' : ''}
+                    </div>
+                ` : '';
+
+                return `<div>${quickAdd} <div class="space-y-4">${list}</div></div>`;
+            };
+
+            const renderBalancesTab = () => {
+                return `
+                    <div class="space-y-6">
+                        <div class="grid gap-4">
+                            ${memberStats.map(m => `
+                                <div class="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-lg shadow-sm">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${m.balance >= 0 ? 'bg-green-500' : 'bg-red-500'}">${m.name.charAt(0).toUpperCase()}</div>
+                                        <span class="font-medium text-lg">${m.name}</span>
+                                    </div>
+                                    <div class="text-lg font-bold ${m.balance > 0 ? 'text-green-600' : m.balance < 0 ? 'text-red-600' : 'text-gray-400'}">
+                                        ${m.balance > 0 ? '+' : ''}${formatCurrency(m.balance)}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${trip.expenses.length > 0 ? `
+                            <div class="mt-8 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                                <h3 class="font-bold text-indigo-900 mb-3 flex items-center gap-2"><i data-lucide="wallet" class="w-4 h-4"></i> Gợi ý thanh toán</h3>
+                                <p class="text-sm text-indigo-700">Người âm tiền (đỏ) chuyển cho người dương tiền (xanh) để cân bằng.</p>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            };
+
+            const renderReportTab = () => {
+                const topSpender = [...memberStats].sort((a, b) => b.paid - a.paid)[0];
+                
+                // Charts HTML construction
+                const paidChart = memberStats.map(m => {
+                    const pct = totalSpent > 0 ? (m.paid / totalSpent) * 100 : 0;
+                    return `
+                        <div class="mb-3">
+                            <div class="flex justify-between text-xs mb-1"><span class="font-medium">${m.name}</span><span class="text-gray-500">${formatCurrency(m.paid)}</span></div>
+                            <div class="w-full bg-gray-100 rounded-full h-2.5"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${pct}%"></div></div>
+                        </div>`;
+                }).join('');
+
+                const consumedChart = [...memberStats].sort((a,b) => b.consumed - a.consumed).map(m => {
+                    const pct = totalSpent > 0 ? (m.consumed / totalSpent) * 100 : 0;
+                    return `
+                        <div class="mb-3">
+                            <div class="flex justify-between text-xs mb-1"><span class="font-medium">${m.name}</span><span class="text-gray-500">${formatCurrency(m.consumed)}</span></div>
+                            <div class="w-full bg-gray-100 rounded-full h-2.5"><div class="bg-pink-500 h-2.5 rounded-full" style="width: ${pct}%"></div></div>
+                        </div>`;
+                }).join('');
+
+                return `
+                    <div class="space-y-8 animate-fade-in-up">
+                        <!-- Summary -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                                <p class="text-blue-600 text-sm font-medium mb-1">Tổng Chi Phí</p>
+                                <p class="text-2xl font-bold text-blue-900">${formatCurrency(totalSpent)}</p>
+                            </div>
+                            <div class="bg-purple-50 p-4 rounded-xl border border-purple-200">
+                                <p class="text-purple-600 text-sm font-medium mb-1">Bình Quân/Người</p>
+                                <p class="text-2xl font-bold text-purple-900">${formatCurrency(trip.members.length ? totalSpent/trip.members.length : 0)}</p>
+                            </div>
+                            <div class="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                                <p class="text-amber-600 text-sm font-medium mb-1">Chi Nhiều Nhất</p>
+                                <p class="text-xl font-bold text-amber-900">${topSpender && topSpender.paid > 0 ? topSpender.name : '---'}</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Charts -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                             <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-500"></i> Ai đã chi tiền?</h3>
+                                ${paidChart}
+                             </div>
+                             <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="pie-chart" class="w-4 h-4 text-pink-500"></i> Ai sử dụng nhiều nhất?</h3>
+                                ${consumedChart}
+                             </div>
+                        </div>
+
+                        <!-- Table -->
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50"><h3 class="font-bold text-gray-800">Chi tiết công nợ</h3></div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
+                                        <tr><th class="px-6 py-3">Thành viên</th><th class="px-6 py-3 text-right">Đã Chi</th><th class="px-6 py-3 text-right">Sử Dụng</th><th class="px-6 py-3 text-right">Chênh Lệch</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        ${memberStats.map(m => `
+                                            <tr class="bg-white border-b border-gray-100 hover:bg-gray-50">
+                                                <td class="px-6 py-4 font-medium text-gray-900">${m.name}</td>
+                                                <td class="px-6 py-4 text-right text-indigo-600">${formatCurrency(m.paid)}</td>
+                                                <td class="px-6 py-4 text-right text-pink-600">${formatCurrency(m.consumed)}</td>
+                                                <td class="px-6 py-4 text-right font-bold ${m.balance >= 0 ? 'text-green-600' : 'text-red-600'}">${m.balance > 0 ? '+' : ''}${formatCurrency(m.balance)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const renderMembersTab = () => {
+                return `
+                    <div>
+                        ${!store.isReadOnly ? `
+                        <form data-action="add-member" class="flex gap-2 mb-6">
+                            <input type="text" id="new-member-input" value="${store.newMemberName}" placeholder="Tên thành viên mới..." class="flex-1 rounded-md border border-gray-300 p-2 shadow-sm" />
+                            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">Thêm</button>
+                        </form>` : ''}
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${trip.members.map(m => `
+                                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-indigo-200 flex items-center justify-center text-indigo-700 font-bold text-xs">${m.name.charAt(0).toUpperCase()}</div>
+                                        <span class="font-medium">${m.name}</span>
+                                    </div>
+                                    ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            };
+
+            // Main Detail HTML
+            let content = '';
+            if (store.activeTab === 'expenses') content = renderExpensesTab();
+            else if (store.activeTab === 'balances') content = renderBalancesTab();
+            else if (store.activeTab === 'report') content = renderReportTab();
+            else if (store.activeTab === 'members') content = renderMembersTab();
+
+            const tabClass = (tab) => `flex-1 py-4 px-4 text-sm font-medium text-center border-b-2 whitespace-nowrap ${store.activeTab === tab ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`;
+
+            return `
+                <div class="container mx-auto px-4 py-6 max-w-4xl animate-fade-in-down">
+                    <!-- ReadOnly Banner -->
+                    ${store.isReadOnly ? `
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-blue-700"><i data-lucide="lock" class="w-4 h-4"></i><span class="text-sm font-medium">Chế độ chỉ đọc (View Only).</span></div>
+                        <button data-action="enable-editing" class="bg-white text-blue-600 border border-blue-200 px-3 py-1 rounded text-xs font-medium hover:bg-blue-50 flex items-center gap-1"><i data-lucide="unlock" class="w-3 h-3"></i> Chỉnh sửa</button>
+                    </div>` : ''}
+
+                    <!-- Header -->
+                    <div class="mb-6">
+                        <button data-action="back-to-list" class="text-gray-500 hover:text-indigo-600 flex items-center mb-4"><i data-lucide="arrow-left" class="w-4 h-4 mr-1"></i> Quay lại</button>
+                        <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                            <div class="h-48 w-full relative">
+                                <img src="${trip.coverImage}" class="w-full h-full object-cover" />
+                                <div class="absolute inset-0 bg-black/30 flex items-end p-6">
+                                    <div>
+                                        <h1 class="text-3xl font-bold text-white mb-1">${trip.name}</h1>
+                                        <p class="text-white/90 text-sm flex items-center gap-2"><i data-lucide="users" class="w-4 h-4"></i> ${trip.members.length} thành viên • Tổng chi: <span class="font-bold text-green-300">${formatCurrency(totalSpent)}</span></p>
+                                    </div>
+                                </div>
+                                <button data-action="share-trip" class="absolute top-4 right-4 bg-white/20 backdrop-blur-sm p-2 rounded-full text-white hover:bg-white/40 transition-all"><i data-lucide="share-2" class="w-5 h-5"></i></button>
+                            </div>
+                            <div class="flex border-b border-gray-200 overflow-x-auto">
+                                <button data-action="switch-tab" data-tab="expenses" class="${tabClass('expenses')}"><div class="flex items-center justify-center gap-2"><i data-lucide="receipt" class="w-4 h-4"></i> Chi Tiêu</div></button>
+                                <button data-action="switch-tab" data-tab="balances" class="${tabClass('balances')}"><div class="flex items-center justify-center gap-2"><i data-lucide="wallet" class="w-4 h-4"></i> Công Nợ</div></button>
+                                <button data-action="switch-tab" data-tab="report" class="${tabClass('report')}"><div class="flex items-center justify-center gap-2"><i data-lucide="bar-chart-3" class="w-4 h-4"></i> Tổng kết</div></button>
+                                <button data-action="switch-tab" data-tab="members" class="${tabClass('members')}"><div class="flex items-center justify-center gap-2"><i data-lucide="users" class="w-4 h-4"></i> Thành Viên</div></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 min-h-[400px]">
+                        ${content}
+                    </div>
+                </div>
+            `;
+        };
+
+        // 3. Expense Modal
+        const renderExpenseModal = () => {
+            if (!store.expenseModalOpen) return '';
+            
+            const trip = store.trips.find(t => t.id === store.activeTripId);
+            if (!trip) return '';
+
+            const involvedIds = store.expenseForm.involvedIds.length > 0 ? store.expenseForm.involvedIds : trip.members.map(m => m.id);
+            const isAllSelected = involvedIds.length === trip.members.length;
+
+            return `
+                <div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" data-action="close-modal"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg w-full">
+                            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                                <div class="flex justify-between items-center mb-4 border-b pb-2">
+                                    <h3 class="text-lg leading-6 font-medium text-gray-900">${store.editingExpenseId ? 'Sửa Khoản Chi' : 'Thêm Khoản Chi Mới'}</h3>
+                                    <button data-action="close-modal" class="text-gray-400 hover:text-gray-500"><i data-lucide="x" class="w-6 h-6"></i></button>
+                                </div>
+                                <div class="space-y-4">
+                                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Mô tả</label><input type="text" id="ex-desc" value="${store.expenseForm.desc}" class="w-full rounded-md border border-gray-300 p-2" placeholder="VD: Vé tham quan"></div>
+                                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Số tiền (VNĐ)</label><input type="number" id="ex-amount" value="${store.expenseForm.amount}" class="w-full rounded-md border border-gray-300 p-2" placeholder="0"></div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Người trả</label>
+                                        <select id="ex-payer" class="w-full rounded-md border border-gray-300 p-2">
+                                            <option value="">-- Chọn người trả --</option>
+                                            ${trip.members.map(m => `<option value="${m.id}" ${m.id === store.expenseForm.payerId ? 'selected' : ''}>${m.name}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <div class="flex justify-between items-center mb-2">
+                                            <label class="block text-sm font-medium text-gray-700">Thành viên tham gia</label>
+                                            <button data-action="toggle-select-all" class="text-xs text-indigo-600 font-medium hover:underline">${isAllSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button>
+                                        </div>
+                                        <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+                                            ${trip.members.map(m => {
+                                                const isSelected = involvedIds.includes(m.id);
+                                                return `<button type="button" data-action="toggle-involved" data-id="${m.id}" class="px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${isSelected ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200'}">${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''} ${m.name}</button>`;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                                <button type="button" data-action="save-expense" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm">Lưu</button>
+                                <button type="button" data-action="close-modal" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Hủy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // --- RENDER MAIN ---
+        const render = () => {
+            if (store.activeTripId) {
+                app.innerHTML = renderTripDetail();
+            } else {
+                app.innerHTML = renderTripList();
+            }
+            modalContainer.innerHTML = renderExpenseModal();
+            lucide.createIcons(); // Refresh Icons
+        };
+
+        // --- EVENT HANDLERS (DELEGATION) ---
+        document.addEventListener('click', async (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+            
+            const action = target.dataset.action;
+            const id = target.dataset.id;
+
+            // Routing / View
+            if (action === 'select-trip') {
+                store.activeTripId = id;
+                store.isReadOnly = false; // Default to edit when selecting from list
+                store.activeTab = 'expenses';
+                render();
+            }
+            if (action === 'back-to-list') {
+                store.activeTripId = null;
+                render();
+            }
+            if (action === 'switch-tab') {
+                store.activeTab = target.dataset.tab;
+                render();
+            }
+
+            // Trip Creation
+            if (action === 'toggle-create-form') {
+                store.isCreating = !store.isCreating;
+                render();
+                if(store.isCreating) setTimeout(() => document.getElementById('new-trip-input')?.focus(), 50);
+            }
+            if (action === 'cancel-create') {
+                store.isCreating = false;
+                render();
+            }
+            if (action === 'delete-trip') {
+                if(confirm("Bạn có chắc muốn xóa chuyến đi này?")) {
+                    store.trips = store.trips.filter(t => t.id !== id);
+                    saveStore();
+                }
+            }
+
+            // Sharing
+            if (action === 'share-trip') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const encoded = encodeData(trip);
+                const url = `${window.location.origin}${window.location.pathname}#share=${encoded}`;
+                if (url.length > 8000) alert("Dữ liệu quá lớn để tạo link.");
+                else {
+                    navigator.clipboard.writeText(url);
+                    alert("Đã sao chép link chia sẻ (View Only)!");
+                }
+            }
+            if (action === 'enable-editing') {
+                store.isReadOnly = false;
+                render();
+            }
+
+            // Members
+            if (action === 'remove-member') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                trip.members = trip.members.filter(m => m.id !== id);
+                saveStore();
+            }
+
+            // Expenses - Modal logic
+            if (action === 'open-expense-modal') {
+                store.expenseModalOpen = true;
+                store.editingExpenseId = null;
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                store.expenseForm = { desc: '', amount: '', payerId: '', involvedIds: trip.members.map(m => m.id) };
+                render();
+            }
+            if (action === 'close-modal') {
+                store.expenseModalOpen = false;
+                render();
+            }
+            if (action === 'edit-expense') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const expense = trip.expenses.find(e => e.id === id);
+                store.expenseModalOpen = true;
+                store.editingExpenseId = id;
+                store.expenseForm = { 
+                    desc: expense.description, 
+                    amount: expense.amount, 
+                    payerId: expense.payerId, 
+                    involvedIds: expense.involvedMemberIds || trip.members.map(m => m.id) 
+                };
+                render();
+            }
+            if (action === 'delete-expense') {
+                if(confirm("Xóa khoản chi này?")) {
+                    const trip = store.trips.find(t => t.id === store.activeTripId);
+                    trip.expenses = trip.expenses.filter(e => e.id !== id);
+                    saveStore();
+                }
+            }
+            
+            // Expenses - Modal Form Interactions
+            if (action === 'toggle-involved') {
+                const id = target.dataset.id;
+                if (store.expenseForm.involvedIds.includes(id)) {
+                    store.expenseForm.involvedIds = store.expenseForm.involvedIds.filter(i => i !== id);
+                } else {
+                    store.expenseForm.involvedIds.push(id);
+                }
+                render(); // Re-render modal to show checkmarks
+                // Keep focus logic if needed, or just simple re-render
+                document.getElementById('modal-container').querySelector('input').focus(); // Naive Refocus
+            }
+            if (action === 'toggle-select-all') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                if (store.expenseForm.involvedIds.length === trip.members.length) {
+                    store.expenseForm.involvedIds = [];
+                } else {
+                    store.expenseForm.involvedIds = trip.members.map(m => m.id);
+                }
+                render();
+            }
+            if (action === 'save-expense') {
+                const desc = document.getElementById('ex-desc').value;
+                const amount = parseInt(document.getElementById('ex-amount').value);
+                const payerId = document.getElementById('ex-payer').value;
+
+                if (!desc || isNaN(amount) || !payerId || store.expenseForm.involvedIds.length === 0) {
+                    alert("Vui lòng nhập đủ thông tin");
+                    return;
+                }
+
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                
+                if (store.editingExpenseId) {
+                    // Update
+                    trip.expenses = trip.expenses.map(e => e.id === store.editingExpenseId ? {
+                        ...e, description: desc, amount, payerId, involvedMemberIds: store.expenseForm.involvedIds
+                    } : e);
+                } else {
+                    // Create
+                    trip.expenses.unshift({
+                        id: generateId(),
+                        description: desc,
+                        amount,
+                        payerId,
+                        date: new Date().toISOString(),
+                        involvedMemberIds: store.expenseForm.involvedIds
+                    });
+                }
+                store.expenseModalOpen = false;
+                saveStore();
+            }
+
+            // AI Quick Add
+            if (action === 'ai-quick-add') {
+                const input = document.getElementById('quick-add-input');
+                const text = input.value.trim();
+                if (!text) return;
+
+                store.isAnalyzing = true;
+                store.quickAddText = text; // sync input
+                render();
+
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const memberNames = trip.members.map(m => m.name);
+                
+                const result = await parseExpenseWithAI(text, memberNames);
+                store.isAnalyzing = false;
+
+                if (result) {
+                    store.expenseModalOpen = true;
+                    store.editingExpenseId = null;
+                    let payerId = '';
+                    const matched = trip.members.find(m => m.name.toLowerCase() === result.payerName?.toLowerCase());
+                    if (matched) payerId = matched.id;
+
+                    store.expenseForm = {
+                        desc: result.description,
+                        amount: result.amount,
+                        payerId: payerId,
+                        involvedIds: trip.members.map(m => m.id)
+                    };
+                }
+                render();
+            }
+        });
+
+        // --- INPUT HANDLERS ---
+        // Since we re-render on state change, we lose input focus/state if we re-render on every keypress.
+        // Approach: Only update store on blur or specific events, or read value directly on submit.
+        // Exception: Search/Quick add usually needs state sync, but here we read DOM on submit for simplicity in Vanilla JS.
+        
+        document.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const target = e.target;
+            const action = target.dataset.action;
+
+            if (action === 'submit-create-trip') {
+                const name = document.getElementById('new-trip-input').value;
+                if (!name) return;
+                const newTrip = {
+                    id: generateId(),
+                    name: name,
+                    startDate: new Date().toISOString().split('T')[0],
+                    coverImage: getRandomImage(600, 400, name),
+                    members: [],
+                    expenses: []
+                };
+                store.trips.unshift(newTrip);
+                store.isCreating = false;
+                store.newTripName = '';
+                saveStore();
+            }
+
+            if (action === 'add-member') {
+                const name = document.getElementById('new-member-input').value;
+                if (!name) return;
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                trip.members.push({ id: generateId(), name: name });
+                store.newMemberName = '';
+                saveStore();
+            }
+        });
+
+        // Init
+        initStore();
+        render();
+
+    </script>
+</body>
 </html>
