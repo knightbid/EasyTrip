@@ -565,6 +565,14 @@
                 quickAdd.focus();
                 quickAdd.selectionStart = quickAdd.selectionEnd = quickAdd.value.length;
             }
+            
+            // Restore focus to modal inputs if they were active
+            if (store.expenseModalOpen) {
+               if(document.activeElement && document.activeElement.id && ['ex-desc', 'ex-amount'].includes(document.activeElement.id)) {
+                    const el = document.getElementById(document.activeElement.id);
+                    if(el) el.focus();
+               }
+            }
         };
 
         // --- EVENT HANDLERS ---
@@ -637,13 +645,29 @@
             e.preventDefault();
             const action = e.target.dataset.action;
             if (action === 'submit-create-trip') { const name = document.getElementById('new-trip-input').value; if(name) await createTripInDB(name); }
-            if (action === 'add-member') { const name = document.getElementById('new-member-input').value; if(name) { const trip = store.trips.find(t => t.id === store.activeTripId); await updateTripInDB({ ...trip, members: [...trip.members, { id: generateId(), name }] }); store.newMemberName = ''; } }
+            if (action === 'add-member') { 
+                const input = document.getElementById('new-member-input');
+                const name = input.value; 
+                if(name) { 
+                    const trip = store.trips.find(t => t.id === store.activeTripId); 
+                    await updateTripInDB({ ...trip, members: [...trip.members, { id: generateId(), name }] }); 
+                    store.newMemberName = ''; 
+                    // Clear input immediately and refocus for better UX
+                    input.value = ''; 
+                    input.focus();
+                } 
+            }
         });
 
         document.addEventListener('input', (e) => {
             if (e.target.id === 'new-trip-input') store.newTripName = e.target.value;
             if (e.target.id === 'new-member-input') store.newMemberName = e.target.value;
             if (e.target.id === 'quick-add-input') store.quickAddText = e.target.value;
+            
+            // Sync Expense Modal inputs to Store so re-renders (toggle members) don't wipe data
+            if (e.target.id === 'ex-desc') store.expenseForm.desc = e.target.value;
+            if (e.target.id === 'ex-amount') store.expenseForm.amount = e.target.value ? parseInt(e.target.value) : '';
+            if (e.target.id === 'ex-payer') store.expenseForm.payerId = e.target.value;
         });
 
         document.addEventListener('keydown', (e) => {
