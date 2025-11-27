@@ -135,7 +135,11 @@
         }
 
         const TRIPS_COLLECTION = 'trips';
-
+        window.process = {
+                    env: {
+                        API_KEY: "AIzaSyDwRNuU5X08cAfXhyHCE64oEYMLbobnWeY" 
+                    }
+                };
         // --- API KEY & CONFIG ---
         const API_KEY = window.process?.env?.API_KEY || '';
 
