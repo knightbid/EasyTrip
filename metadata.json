@@ -1,5 +1,6 @@
 {
   "name": "Chia Tiền Đi Chơi (TripSplit AI)",
   "description": "Ứng dụng quản lý chi tiêu nhóm, tính tiền đi chơi và chia hóa đơn thông minh hỗ trợ bởi Gemini AI.",
+  "gemini_api_key": "AIzaSyDwRNuU5X08cAfXhyHCE64oEYMLbobnWeY",
   "requestFramePermissions": []
 }
