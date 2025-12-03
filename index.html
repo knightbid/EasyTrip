@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chia Bill Thôi</title>
+    <title>Chia Tiền Đi Chơi (TripSplit AI) - Firebase</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -74,7 +74,7 @@
     <!-- Setup Check Script -->
     <script>
         // Shim for process.env to avoid errors
-        window.process = { env: { API_KEY: 'AIzaSyDwRNuU5X08cAfXhyHCE64oEYMLbobnWeY' } };
+        window.process = { env: { API_KEY: '' } };
 
         // Check if running via file:// protocol
         if (window.location.protocol === 'file:') {
@@ -86,7 +86,7 @@
     <div id="global-loader">
         <div class="flex flex-col items-center text-center p-4">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-3"></div>
-            <p class="text-indigo-600 font-medium animate-pulse" id="loader-text">Đang kết nối ...</p>
+            <p class="text-indigo-600 font-medium animate-pulse" id="loader-text">Đang kết nối Firebase...</p>
             <p class="text-xs text-gray-400 mt-2 max-w-xs">Nếu quá lâu, hãy kiểm tra kết nối mạng.</p>
         </div>
     </div>
@@ -118,6 +118,7 @@
             appId: "1:277993628196:web:37ba3db909a6d5398e6eb1"
         };
 
+        // Initialize Firebase
         let db;
         try {
             const firebaseApp = initializeApp(firebaseConfig);
@@ -130,17 +131,13 @@
         } catch (e) {
             console.error("Firebase Initialization Error:", e);
             const loaderText = document.getElementById('loader-text');
-            if(loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
+            if(loaderText) loaderText.innerText = "Lỗi kết nối Firebase. Vui lòng tải lại.";
         }
 
         const TRIPS_COLLECTION = 'trips';
-        window.process = {
-                    env: {
-                        API_KEY: "AIzaSyDwRNuU5X08cAfXhyHCE64oEYMLbobnWeY" 
-                    }
-                };
+
         // --- API KEY & CONFIG ---
-        const API_KEY = window.process?.env?.API_KEY || 'AIzaSyDwRNuU5X08cAfXhyHCE64oEYMLbobnWeY';
+        const API_KEY = window.process?.env?.API_KEY || '';
 
         // --- UTILS ---
         const formatCurrency = (amount) => {
@@ -243,7 +240,7 @@
                 console.error("Firebase Error:", error);
                 
                 if (error.code === 'permission-denied') {
-                    alert("Lỗi quyền truy cập (CORS/Rules). Vui lòng kiểm tra Rules.");
+                    alert("Lỗi quyền truy cập (CORS/Rules). Vui lòng kiểm tra Firebase Rules.");
                 }
                 
                 render(); // Render empty state at least
