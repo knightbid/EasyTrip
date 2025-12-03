@@ -47,7 +47,7 @@
     "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
   }
 }
 </script>
@@ -67,6 +67,11 @@
             backdrop-filter: blur(2px); transition: opacity 0.3s;
         }
         .hidden-loader { opacity: 0; pointer-events: none; }
+        
+        /* Table Sticky Columns */
+        .sticky-col-left { position: sticky; left: 0; z-index: 20; background-color: inherit; }
+        .sticky-header { position: sticky; top: 0; z-index: 30; }
+        .shadow-right { box-shadow: 4px 0 4px -2px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
@@ -181,19 +186,17 @@
             newMemberName: '',
             quickAddText: '',
             isAnalyzing: false,
+            reportSearchText: '',
             expenseForm: { desc: '', amount: '', payerId: '', involvedIds: [] }
         };
 
         // --- FIREBASE OPERATIONS ---
 
-        // 1. Listen to Trips (Real-time)
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
             const loaderText = document.getElementById('loader-text');
             
             if (!db) {
-                // Fallback if DB failed to init
-                console.warn("DB not initialized, rendering empty state.");
                 render();
                 if(loader) loader.classList.add('hidden-loader');
                 return;
@@ -201,12 +204,8 @@
             
             const q = collection(db, TRIPS_COLLECTION);
             
-            console.log("Listening to 'trips'...");
-            
-            // Safety Timeout: If Firebase hangs for 5 seconds, let the user enter the app anyway
             const safetyTimeout = setTimeout(() => {
                 if (loader && !loader.classList.contains('hidden-loader')) {
-                    console.warn("Firebase connection taking too long. Hiding loader.");
                     loaderText.innerText = "Kết nối chậm. Đang vào chế độ offline...";
                     setTimeout(() => {
                         render(); 
@@ -217,14 +216,11 @@
 
             onSnapshot(q, (snapshot) => {
                 clearTimeout(safetyTimeout);
-                console.log("Snapshot received. Docs:", snapshot.size);
-                
                 const tripsData = [];
                 snapshot.forEach((doc) => {
                     tripsData.push({ id: doc.id, ...doc.data() });
                 });
                 
-                // Sort by createdAt descending (newest first)
                 store.trips = tripsData.sort((a,b) => {
                     const timeA = a.createdAt?.seconds || 0;
                     const timeB = b.createdAt?.seconds || 0;
@@ -232,18 +228,12 @@
                 });
 
                 checkShareLink();
-                
                 render();
                 if(loader) loader.classList.add('hidden-loader');
             }, (error) => {
                 clearTimeout(safetyTimeout);
                 console.error("Firebase Error:", error);
-                
-                if (error.code === 'permission-denied') {
-                    alert("Lỗi quyền truy cập (CORS/Rules). Vui lòng kiểm tra Firebase Rules.");
-                }
-                
-                render(); // Render empty state at least
+                render();
                 if(loader) loader.classList.add('hidden-loader');
             });
         };
@@ -257,6 +247,7 @@
                     if (sharedTrip && sharedTrip.id) {
                         store.activeTripId = sharedTrip.id;
                         store.isReadOnly = true;
+                        // Temporarily add to store for viewing
                         if (!store.trips.find(t => t.id === sharedTrip.id)) {
                             store.trips.push(sharedTrip);
                         }
@@ -265,6 +256,7 @@
             }
         };
 
+        // --- DB FUNCTIONS (UPDATED: Removed isReadOnly checks to fix delete bugs) ---
         const createTripInDB = async (name) => {
             try {
                 const newTrip = {
@@ -280,38 +272,36 @@
                 store.newTripName = '';
                 store.activeTripId = docRef.id;
                 render();
-            } catch (e) {
-                console.error("Error adding trip: ", e);
-                alert("Lỗi tạo chuyến đi. Kiểm tra Console.");
-            }
+            } catch (e) { alert("Lỗi tạo chuyến đi: " + e.message); }
         };
 
         const updateTripInDB = async (trip) => {
-            if (!trip || !trip.id || store.isReadOnly) return;
+            if (!trip || !trip.id) return;
+            // REMOVED: if (store.isReadOnly) return; -> Allow updates if UI allows it
             try {
                 const tripRef = doc(db, TRIPS_COLLECTION, trip.id);
                 const { id, ...dataToSave } = trip;
                 await updateDoc(tripRef, dataToSave);
-            } catch (e) {
-                console.error("Error updating trip: ", e);
-            }
+            } catch (e) { console.error("Error updating trip: ", e); }
         };
 
         const deleteTripFromDB = async (id) => {
-            if (!id || store.isReadOnly) return;
+            if (!id) return;
+            // REMOVED: if (store.isReadOnly) return; -> Allow deletion
             try {
                 await deleteDoc(doc(db, TRIPS_COLLECTION, id));
                 if (store.activeTripId === id) store.activeTripId = null;
+                render(); // Force render to refresh list
             } catch (e) {
                 console.error("Error deleting trip: ", e);
-                alert("Không thể xóa chuyến đi.");
+                alert("Không thể xóa chuyến đi. " + e.message);
             }
         };
 
         // --- AI SERVICE ---
         const parseExpenseWithAI = async (text, memberNames) => {
             if (!API_KEY) {
-                alert("Chưa cấu hình API Key! Vui lòng kiểm tra metadata.json hoặc cấu hình môi trường.");
+                alert("Chưa cấu hình API Key!");
                 return null;
             }
             try {
@@ -319,8 +309,7 @@
                 const prompt = `
                 Phân tích chi tiêu: "${text}".
                 Thành viên: ${memberNames.join(", ")}.
-                Nếu tên người trả không có trong danh sách, hãy chọn người có tên gần giống nhất hoặc để trống.
-                Trả về JSON thuần túy không markdown.
+                Trả về JSON thuần túy.
                 `;
 
                 const response = await ai.models.generateContent({
@@ -331,9 +320,9 @@
                         responseSchema: {
                             type: Type.OBJECT,
                             properties: {
-                                description: { type: Type.STRING, description: "Mô tả khoản chi" },
-                                amount: { type: Type.NUMBER, description: "Số tiền" },
-                                payerName: { type: Type.STRING, description: "Tên người trả" },
+                                description: { type: Type.STRING },
+                                amount: { type: Type.NUMBER },
+                                payerName: { type: Type.STRING },
                             },
                             required: ["description", "amount", "payerName"],
                         },
@@ -341,13 +330,12 @@
                 });
                 return JSON.parse(response.text);
             } catch (e) {
-                console.error("AI Error", e);
                 alert("Lỗi AI: " + e.message);
                 return null;
             }
         };
 
-        // --- RENDER ---
+        // --- RENDER FUNCTIONS ---
         const app = document.getElementById('app');
         const modalContainer = document.getElementById('modal-container');
 
@@ -373,7 +361,7 @@
                             </div>
                             <div class="mt-auto flex justify-between items-center pt-4 border-t border-gray-100">
                                 <button data-action="select-trip" data-id="${trip.id}" class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1 rounded text-xs font-medium transition-colors">Xem Chi Tiết</button>
-                                <button data-action="delete-trip" data-id="${trip.id}" class="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                <button data-action="delete-trip" data-id="${trip.id}" class="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors z-20"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                             </div>
                         </div>
                     </div>
@@ -409,15 +397,17 @@
             const members = trip.members || [];
             const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
             
+            // Calculate Stats
             const memberStats = members.map(m => {
                 let paid = 0;
                 let consumed = 0;
+                let txCount = 0; // Transactions involved/paid
                 expenses.forEach(e => {
-                    if (e.payerId === m.id) paid += e.amount;
+                    if (e.payerId === m.id) { paid += e.amount; txCount++; }
                     const involved = (e.involvedMemberIds && e.involvedMemberIds.length > 0) ? e.involvedMemberIds : members.map(mem => mem.id);
-                    if (involved.includes(m.id)) consumed += e.amount / involved.length;
+                    if (involved.includes(m.id)) { consumed += e.amount / involved.length; }
                 });
-                return { ...m, paid, consumed, balance: paid - consumed };
+                return { ...m, paid, consumed, balance: paid - consumed, txCount };
             }).sort((a, b) => a.balance - b.balance);
 
             const renderExpensesTab = () => {
@@ -459,19 +449,83 @@
                             <span class="font-medium text-lg">${m.name}</span>
                         </div>
                         <div class="text-lg font-bold ${m.balance > 0 ? 'text-green-600' : m.balance < 0 ? 'text-red-600' : 'text-gray-400'}">${m.balance > 0 ? '+' : ''}${formatCurrency(m.balance)}</div>
-                    </div>`).join('')}</div></div>`;
+                    </div>`).join('')}</div>
+                    ${trip.expenses.length > 0 ? `<div class="p-4 bg-indigo-50 rounded-xl border border-indigo-100"><h3 class="font-bold text-indigo-900 mb-2 flex items-center gap-2"><i data-lucide="wallet" class="w-4 h-4"></i> Gợi ý</h3><p class="text-sm text-indigo-700">Người âm tiền (đỏ) chuyển cho người dương tiền (xanh) để cân bằng.</p></div>` : ''}
+                </div>`;
 
             const renderReportTab = () => {
                 const topSpender = [...memberStats].sort((a, b) => b.paid - a.paid)[0];
-                return `
-                    <div class="space-y-8 animate-fade-in-up">
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><p class="text-blue-600 text-sm font-medium">Tổng Chi Phí</p><p class="text-2xl font-bold text-blue-900">${formatCurrency(totalSpent)}</p></div>
-                            <div class="bg-purple-50 p-4 rounded-xl border border-purple-200"><p class="text-purple-600 text-sm font-medium">Bình Quân/Người</p><p class="text-2xl font-bold text-purple-900">${formatCurrency(members.length ? totalSpent/members.length : 0)}</p></div>
-                            <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><p class="text-amber-600 text-sm font-medium">Chi Nhiều Nhất</p><p class="text-xl font-bold text-amber-900">${topSpender && topSpender.paid > 0 ? topSpender.name : '---'}</p></div>
+                const mostActive = [...memberStats].sort((a, b) => b.txCount - a.txCount)[0];
+                
+                // Filter logic for matrix
+                const searchText = store.reportSearchText.toLowerCase();
+                const filteredExpenses = expenses.filter(e => e.description.toLowerCase().includes(searchText));
+
+                const matrixHtml = `
+                    <div class="mt-8 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4">
+                            <h3 class="font-bold text-gray-800 flex items-center gap-2"><i data-lucide="grid" class="w-4 h-4"></i> Ma trận sử dụng (Ai dùng gì?)</h3>
+                            <div class="relative w-full sm:w-64">
+                                <input type="text" id="report-search" value="${store.reportSearchText}" placeholder="Lọc khoản chi..." class="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-full focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-2.5"></i>
+                            </div>
                         </div>
+                        <div class="overflow-x-auto max-h-[500px]">
+                            <table class="w-full text-sm text-left border-collapse">
+                                <thead class="text-xs text-gray-500 uppercase bg-gray-50 sticky-header shadow-sm">
+                                    <tr>
+                                        <th class="px-4 py-3 sticky-col-left bg-gray-50 shadow-right min-w-[150px]">Khoản chi</th>
+                                        <th class="px-4 py-3 text-right whitespace-nowrap bg-gray-50">Tổng tiền</th>
+                                        ${members.map(m => `<th class="px-4 py-3 text-center whitespace-nowrap min-w-[100px] bg-gray-50 border-l border-gray-200">${m.name}</th>`).join('')}
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100">
+                                    ${filteredExpenses.length === 0 ? `<tr><td colspan="${members.length + 2}" class="px-6 py-8 text-center text-gray-400 italic">Không tìm thấy khoản chi nào.</td></tr>` : 
+                                    filteredExpenses.map(e => {
+                                        const involved = e.involvedMemberIds && e.involvedMemberIds.length > 0 ? e.involvedMemberIds : members.map(m => m.id);
+                                        return `
+                                            <tr class="hover:bg-gray-50 transition-colors">
+                                                <td class="px-4 py-3 font-medium text-gray-900 sticky-col-left bg-white shadow-right max-w-[200px] truncate" title="${e.description}">
+                                                    ${e.description}
+                                                    <div class="text-[10px] text-gray-400 font-normal mt-0.5">${new Date(e.date).toLocaleDateString('vi-VN')}</div>
+                                                </td>
+                                                <td class="px-4 py-3 text-right text-indigo-600 font-medium whitespace-nowrap">${formatCurrency(e.amount)}</td>
+                                                ${members.map(m => {
+                                                    const isInvolved = involved.includes(m.id);
+                                                    const splitAmount = e.amount / involved.length;
+                                                    return `
+                                                        <td class="px-4 py-3 text-center border-l border-gray-100">
+                                                            ${isInvolved 
+                                                                ? `<div class="flex flex-col items-center group/cell">
+                                                                    <i data-lucide="check-circle-2" class="w-5 h-5 text-green-500 mb-1"></i>
+                                                                    <span class="text-[10px] text-gray-400 font-medium group-hover/cell:text-gray-600">${formatCurrency(splitAmount)}</span>
+                                                                   </div>` 
+                                                                : '<span class="text-gray-200 text-lg">-</span>'}
+                                                        </td>
+                                                    `;
+                                                }).join('')}
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+
+                return `
+                    <div class="space-y-6 animate-fade-in-up">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><p class="text-blue-600 text-xs font-bold uppercase">Tổng Chi Phí</p><p class="text-2xl font-bold text-blue-900 mt-1">${formatCurrency(totalSpent)}</p></div>
+                            <div class="bg-purple-50 p-4 rounded-xl border border-purple-200"><p class="text-purple-600 text-xs font-bold uppercase">Bình Quân/Người</p><p class="text-2xl font-bold text-purple-900 mt-1">${formatCurrency(members.length ? totalSpent/members.length : 0)}</p></div>
+                            <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><p class="text-amber-600 text-xs font-bold uppercase">Top Chi Tiền</p><p class="text-xl font-bold text-amber-900 mt-1 truncate">${topSpender && topSpender.paid > 0 ? topSpender.name : '---'}</p></div>
+                            <div class="bg-green-50 p-4 rounded-xl border border-green-200"><p class="text-green-600 text-xs font-bold uppercase">Top Giao Dịch</p><p class="text-xl font-bold text-green-900 mt-1 truncate">${mostActive && mostActive.txCount > 0 ? mostActive.name : '---'}</p></div>
+                        </div>
+
+                        ${matrixHtml}
+
                         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50"><h3 class="font-bold text-gray-800">Chi tiết công nợ</h3></div>
+                            <div class="px-6 py-4 border-b border-gray-100 bg-gray-50"><h3 class="font-bold text-gray-800">Tổng kết công nợ</h3></div>
                             <div class="overflow-x-auto"><table class="w-full text-sm text-left">
                                 <thead class="text-xs text-gray-500 uppercase bg-gray-50"><tr><th class="px-6 py-3">Thành viên</th><th class="px-6 py-3 text-right">Đã Chi</th><th class="px-6 py-3 text-right">Sử Dụng</th><th class="px-6 py-3 text-right">Chênh Lệch</th></tr></thead>
                                 <tbody>${memberStats.map(m => `
@@ -566,12 +620,16 @@
                 quickAdd.selectionStart = quickAdd.selectionEnd = quickAdd.value.length;
             }
             
-            // Restore focus to modal inputs if they were active
-            if (store.expenseModalOpen) {
-               if(document.activeElement && document.activeElement.id && ['ex-desc', 'ex-amount'].includes(document.activeElement.id)) {
-                    const el = document.getElementById(document.activeElement.id);
-                    if(el) el.focus();
-               }
+            // Restore focus report search
+            const reportSearch = document.getElementById('report-search');
+            if (reportSearch) {
+                reportSearch.focus();
+                reportSearch.selectionStart = reportSearch.selectionEnd = reportSearch.value.length;
+            }
+            
+            // Restore focus to modal inputs
+            if (store.expenseModalOpen && document.activeElement && ['ex-desc', 'ex-amount'].includes(document.activeElement.id)) {
+                document.getElementById(document.activeElement.id)?.focus();
             }
         };
 
@@ -586,38 +644,32 @@
             const id = target.dataset.id;
 
             if (action === 'select-trip') { store.activeTripId = id; store.isReadOnly = false; store.activeTab = 'expenses'; render(); }
-            if (action === 'back-to-list') { store.activeTripId = null; render(); }
+            if (action === 'back-to-list') { 
+                store.activeTripId = null; 
+                store.isReadOnly = false;
+                window.history.pushState("", document.title, window.location.pathname); // Clear URL hash
+                render(); 
+            }
             if (action === 'switch-tab') { store.activeTab = target.dataset.tab; render(); }
             if (action === 'toggle-create-form') { store.isCreating = !store.isCreating; render(); if(store.isCreating) setTimeout(() => document.getElementById('new-trip-input')?.focus(), 50); }
             if (action === 'cancel-create') { store.isCreating = false; render(); }
-            if (action === 'delete-trip') { if(confirm("Xóa chuyến đi này?")) await deleteTripFromDB(id); }
+            if (action === 'delete-trip') { 
+                e.stopPropagation(); // Prevents opening the trip
+                if(confirm("Xóa chuyến đi này?")) await deleteTripFromDB(id); 
+            }
             if (action === 'share-trip') { const trip = store.trips.find(t => t.id === store.activeTripId); const encoded = encodeData(trip); navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#share=${encoded}`); alert("Đã sao chép link chia sẻ!"); }
             if (action === 'enable-editing') { store.isReadOnly = false; render(); }
             
             if (action === 'remove-member') { 
                 if(!confirm("Xóa thành viên này? Các khoản chi liên quan sẽ được tính lại.")) return;
-                
                 const trip = store.trips.find(t => t.id === store.activeTripId); 
                 const remainingMembers = trip.members.filter(m => m.id !== id);
-                
-                // Recalculate expenses: remove member from involved lists and check payer
                 const updatedExpenses = trip.expenses.map(e => {
-                    // Filter involvedIds
                     const newInvolved = e.involvedMemberIds ? e.involvedMemberIds.filter(mid => mid !== id) : [];
-                    
-                    // If payer was the deleted person, assign to the first available member (or 'Unknown' if none)
                     let newPayerId = e.payerId;
-                    if (e.payerId === id) {
-                        newPayerId = remainingMembers.length > 0 ? remainingMembers[0].id : ''; 
-                    }
-                    
-                    return {
-                        ...e,
-                        payerId: newPayerId,
-                        involvedMemberIds: newInvolved
-                    };
+                    if (e.payerId === id) { newPayerId = remainingMembers.length > 0 ? remainingMembers[0].id : ''; }
+                    return { ...e, payerId: newPayerId, involvedMemberIds: newInvolved };
                 });
-
                 await updateTripInDB({ ...trip, members: remainingMembers, expenses: updatedExpenses });
             }
             
@@ -671,12 +723,7 @@
                 const name = input.value; 
                 if(name) { 
                     const trip = store.trips.find(t => t.id === store.activeTripId); 
-                    
-                    // Clear state and DOM immediately
-                    store.newMemberName = ''; 
-                    input.value = ''; 
-                    input.focus();
-                    
+                    store.newMemberName = ''; input.value = ''; input.focus();
                     await updateTripInDB({ ...trip, members: [...trip.members, { id: generateId(), name }] }); 
                 } 
             }
@@ -686,8 +733,8 @@
             if (e.target.id === 'new-trip-input') store.newTripName = e.target.value;
             if (e.target.id === 'new-member-input') store.newMemberName = e.target.value;
             if (e.target.id === 'quick-add-input') store.quickAddText = e.target.value;
+            if (e.target.id === 'report-search') { store.reportSearchText = e.target.value; render(); }
             
-            // Sync Expense Modal inputs to Store so re-renders (toggle members) don't wipe data
             if (e.target.id === 'ex-desc') store.expenseForm.desc = e.target.value;
             if (e.target.id === 'ex-amount') store.expenseForm.amount = e.target.value ? parseInt(e.target.value) : '';
             if (e.target.id === 'ex-payer') store.expenseForm.payerId = e.target.value;
@@ -697,7 +744,6 @@
             if (e.key === 'Enter' && e.target.id === 'quick-add-input') document.querySelector('[data-action="ai-quick-add"]')?.click();
         });
 
-        // Start Listening
         initFirebaseListener();
     </script>
 </body>
