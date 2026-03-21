@@ -1,38 +1,39 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chia Tiền Đi Chơi (TripSplit AI)</title>
-    
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              primary: '#4F46E5',
-              secondary: '#10B981',
-              danger: '#EF4444',
-            },
-            animation: {
-              'fade-in-down': 'fadeInDown 0.3s ease-out',
-              'fade-in-up': 'fadeInUp 0.3s ease-out',
-            },
-            keyframes: {
-              fadeInDown: {
-                '0%': { opacity: '0', transform: 'translateY(-10px)' },
-                '100%': { opacity: '1', transform: 'translateY(0)' },
-              },
-              fadeInUp: {
-                '0%': { opacity: '0', transform: 'translateY(10px)' },
-                '100%': { opacity: '1', transform: 'translateY(0)' },
-              },
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#4F46E5',
+                        secondary: '#10B981',
+                        danger: '#EF4444',
+                    },
+                    animation: {
+                        'fade-in-down': 'fadeInDown 0.3s ease-out',
+                        'fade-in-up': 'fadeInUp 0.3s ease-out',
+                    },
+                    keyframes: {
+                        fadeInDown: {
+                            '0%': { opacity: '0', transform: 'translateY(-10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        fadeInUp: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                    }
+                }
             }
-          }
         }
-      }
     </script>
 
     <!-- Icons -->
@@ -53,27 +54,67 @@
 </script>
 
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
         /* Scrollbar styling */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
         /* Loading Overlay */
         #global-loader {
-            position: fixed; inset: 0; background: rgba(255,255,255,0.95);
-            z-index: 9999; display: flex; justify-content: center; align-items: center;
-            backdrop-filter: blur(2px); transition: opacity 0.3s;
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(2px);
+            transition: opacity 0.3s;
         }
-        .hidden-loader { opacity: 0; pointer-events: none; }
-        
+
+        .hidden-loader {
+            opacity: 0;
+            pointer-events: none;
+        }
+
         /* Table Sticky Columns */
-        .sticky-col-left { position: sticky; left: 0; z-index: 20; background-color: inherit; }
-        .sticky-header { position: sticky; top: 0; z-index: 30; }
-        .shadow-right { box-shadow: 4px 0 4px -2px rgba(0,0,0,0.05); }
+        .sticky-col-left {
+            position: sticky;
+            left: 0;
+            z-index: 20;
+            background-color: inherit;
+        }
+
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+        }
+
+        .shadow-right {
+            box-shadow: 4px 0 4px -2px rgba(0, 0, 0, 0.05);
+        }
     </style>
 </head>
+
 <body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
 
     <!-- Setup Check Script -->
@@ -106,10 +147,10 @@
     <!-- Main Logic Script (Inlined to fix CORS issues) -->
     <script type="module">
         import { initializeApp } from "firebase/app";
-        import { 
-            initializeFirestore, collection, onSnapshot, 
-            addDoc, doc, updateDoc, deleteDoc, 
-            serverTimestamp 
+        import {
+            initializeFirestore, collection, onSnapshot,
+            addDoc, doc, updateDoc, deleteDoc,
+            serverTimestamp
         } from "firebase/firestore";
         import { GoogleGenAI, Type } from "@google/genai";
 
@@ -128,7 +169,7 @@
         try {
             const firebaseApp = initializeApp(firebaseConfig);
             console.log("Firebase App initialized:", firebaseApp.name);
-            
+
             // Initialize Firestore with settings optimized for basic web usage
             db = initializeFirestore(firebaseApp, {
                 // Default settings work best for CDN usage
@@ -136,7 +177,7 @@
         } catch (e) {
             console.error("Firebase Initialization Error:", e);
             const loaderText = document.getElementById('loader-text');
-            if(loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
+            if (loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
         }
 
         const TRIPS_COLLECTION = 'trips';
@@ -159,8 +200,8 @@
         ];
 
         const MEMBER_ICONS = [
-            'user', 'smile', 'cat', 'dog', 'zap', 
-            'star', 'heart', 'music', 'camera', 'coffee', 
+            'user', 'smile', 'cat', 'dog', 'zap',
+            'star', 'heart', 'music', 'camera', 'coffee',
             'gamepad-2', 'ghost', 'crown', 'rocket', 'flower-2'
         ];
 
@@ -189,7 +230,7 @@
         const decodeData = (str) => {
             try {
                 // Decode Base64 then URI component to get back Unicode string
-                return JSON.parse(decodeURIComponent(atob(str).split('').map(function(c) {
+                return JSON.parse(decodeURIComponent(atob(str).split('').map(function (c) {
                     return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
                 }).join('')));
             } catch (e) { console.error(e); return null; }
@@ -222,20 +263,20 @@
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
             const loaderText = document.getElementById('loader-text');
-            
+
             if (!db) {
                 render();
-                if(loader) loader.classList.add('hidden-loader');
+                if (loader) loader.classList.add('hidden-loader');
                 return;
             }
-            
+
             const q = collection(db, TRIPS_COLLECTION);
-            
+
             const safetyTimeout = setTimeout(() => {
                 if (loader && !loader.classList.contains('hidden-loader')) {
                     loaderText.innerText = "Kết nối chậm. Đang vào chế độ offline...";
                     setTimeout(() => {
-                        render(); 
+                        render();
                         loader.classList.add('hidden-loader');
                     }, 1000);
                 }
@@ -247,8 +288,8 @@
                 snapshot.forEach((doc) => {
                     tripsData.push({ id: doc.id, ...doc.data() });
                 });
-                
-                store.trips = tripsData.sort((a,b) => {
+
+                store.trips = tripsData.sort((a, b) => {
                     const timeA = a.createdAt?.seconds || 0;
                     const timeB = b.createdAt?.seconds || 0;
                     return timeB - timeA;
@@ -256,30 +297,40 @@
 
                 checkShareLink();
                 render();
-                if(loader) loader.classList.add('hidden-loader');
+                if (loader) loader.classList.add('hidden-loader');
             }, (error) => {
                 clearTimeout(safetyTimeout);
                 console.error("Firebase Error:", error);
                 render();
-                if(loader) loader.classList.add('hidden-loader');
+                if (loader) loader.classList.add('hidden-loader');
             });
         };
 
         const checkShareLink = () => {
             const hash = window.location.hash;
-            if (hash.startsWith('#share=') && !store.activeTripId) {
+
+            // Hỗ trợ cả link cũ (nếu muốn giữ tương thích)
+            if (hash.startsWith('#share=')) {
                 try {
                     const encoded = hash.substring(7);
                     const sharedTrip = decodeData(encoded);
                     if (sharedTrip && sharedTrip.id) {
                         store.activeTripId = sharedTrip.id;
                         store.isReadOnly = true;
-                        // Temporarily add to store for viewing
                         if (!store.trips.find(t => t.id === sharedTrip.id)) {
                             store.trips.push(sharedTrip);
                         }
                     }
-                } catch(e) { console.error(e); }
+                } catch (e) { console.error(e); }
+            }
+            // Link mới – chỉ cần id
+            else if (hash.startsWith('#trip=')) {
+                const tripId = hash.substring(6);
+                if (tripId) {
+                    store.activeTripId = tripId;
+                    store.isReadOnly = true;
+                    // Không cần push thủ công nữa vì onSnapshot sẽ tự load
+                }
             }
         };
 
@@ -316,7 +367,7 @@
             try {
                 await deleteDoc(doc(db, TRIPS_COLLECTION, id));
                 if (store.activeTripId === id) store.activeTripId = null;
-                render(); 
+                render();
             } catch (e) {
                 console.error("Error deleting trip: ", e);
                 alert("Không thể xóa chuyến đi. " + e.message);
@@ -387,7 +438,7 @@
         const modalContainer = document.getElementById('modal-container');
 
         const renderTripList = () => {
-            const tripsHtml = store.trips.length === 0 
+            const tripsHtml = store.trips.length === 0
                 ? `<div class="text-center py-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 col-span-full">
                     <p class="text-gray-500 text-lg mb-4">Chưa có chuyến đi nào.</p>
                     <button data-action="toggle-create-form" class="text-indigo-600 font-medium hover:underline">Tạo chuyến đi ngay!</button>
@@ -457,7 +508,7 @@
             const expenses = trip.expenses || [];
             const members = trip.members || [];
             const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
-            
+
             // Calculate Stats
             const memberStats = members.map(m => {
                 let paid = 0;
@@ -472,14 +523,14 @@
             }).sort((a, b) => a.balance - b.balance);
 
             const renderExpensesTab = () => {
-                const list = expenses.length === 0 
+                const list = expenses.length === 0
                     ? `<div class="text-center py-12 text-gray-400"><i data-lucide="receipt" class="w-12 h-12 mx-auto mb-2 opacity-20"></i><p>Chưa có khoản chi nào.</p></div>`
                     : expenses.map(e => {
                         const payerMember = members.find(m => m.id === e.payerId);
                         const payer = payerMember?.name || 'Unknown';
                         const count = e.involvedMemberIds?.length || members.length;
                         const iconName = e.categoryIcon || 'receipt';
-                        
+
                         return `
                         <div class="flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg border border-gray-100 transition-colors group">
                             <div class="flex items-start gap-3 flex-1 ${!store.isReadOnly ? 'cursor-pointer' : ''}" data-action="${!store.isReadOnly ? 'edit-expense' : ''}" data-id="${e.id}">
@@ -506,25 +557,25 @@
             };
 
             const renderBalancesTab = () => {
-                const debtors = memberStats.filter(m => m.balance < -100).sort((a,b) => a.balance - b.balance);
-                const creditors = memberStats.filter(m => m.balance > 100).sort((a,b) => b.balance - a.balance);
+                const debtors = memberStats.filter(m => m.balance < -100).sort((a, b) => a.balance - b.balance);
+                const creditors = memberStats.filter(m => m.balance > 100).sort((a, b) => b.balance - a.balance);
                 const suggestions = [];
                 let i = 0; let j = 0;
-                const dList = debtors.map(d => ({...d}));
-                const cList = creditors.map(c => ({...c}));
+                const dList = debtors.map(d => ({ ...d }));
+                const cList = creditors.map(c => ({ ...c }));
 
                 while (i < dList.length && j < cList.length) {
                     const debtor = dList[i];
                     const creditor = cList[j];
                     const amount = Math.min(Math.abs(debtor.balance), creditor.balance);
-                    
+
                     if (amount > 0) {
                         suggestions.push({ from: debtor.name, to: creditor.name, amount });
                     }
-                    
+
                     debtor.balance += amount;
                     creditor.balance -= amount;
-                    
+
                     if (Math.abs(debtor.balance) < 100) i++;
                     if (creditor.balance < 100) j++;
                 }
@@ -594,11 +645,11 @@
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100">
-                                    ${filteredExpenses.length === 0 ? `<tr><td colspan="${members.length + 2}" class="px-6 py-8 text-center text-gray-400 italic">Không tìm thấy khoản chi nào.</td></tr>` : 
-                                    filteredExpenses.map(e => {
-                                        const involved = e.involvedMemberIds && e.involvedMemberIds.length > 0 ? e.involvedMemberIds : members.map(m => m.id);
-                                        const icon = e.categoryIcon || 'receipt';
-                                        return `
+                                    ${filteredExpenses.length === 0 ? `<tr><td colspan="${members.length + 2}" class="px-6 py-8 text-center text-gray-400 italic">Không tìm thấy khoản chi nào.</td></tr>` :
+                        filteredExpenses.map(e => {
+                            const involved = e.involvedMemberIds && e.involvedMemberIds.length > 0 ? e.involvedMemberIds : members.map(m => m.id);
+                            const icon = e.categoryIcon || 'receipt';
+                            return `
                                             <tr class="hover:bg-gray-50 transition-colors">
                                                 <td class="px-4 py-3 font-medium text-gray-900 sticky-col-left bg-white shadow-right max-w-[200px] truncate" title="${e.description}">
                                                     <div class="flex items-center gap-2">
@@ -609,22 +660,22 @@
                                                 </td>
                                                 <td class="px-4 py-3 text-right text-indigo-600 font-medium whitespace-nowrap">${formatCurrency(e.amount)}</td>
                                                 ${members.map(m => {
-                                                    const isInvolved = involved.includes(m.id);
-                                                    const splitAmount = e.amount / involved.length;
-                                                    return `
+                                const isInvolved = involved.includes(m.id);
+                                const splitAmount = e.amount / involved.length;
+                                return `
                                                         <td class="px-4 py-3 text-center border-l border-gray-100">
-                                                            ${isInvolved 
-                                                                ? `<div class="flex flex-col items-center group/cell">
+                                                            ${isInvolved
+                                        ? `<div class="flex flex-col items-center group/cell">
                                                                     <i data-lucide="check-circle-2" class="w-5 h-5 text-green-500 mb-1"></i>
                                                                     <span class="text-[10px] text-gray-400 font-medium group-hover/cell:text-gray-600">${formatCurrency(splitAmount)}</span>
-                                                                   </div>` 
-                                                                : '<span class="text-gray-200 text-lg">-</span>'}
+                                                                   </div>`
+                                        : '<span class="text-gray-200 text-lg">-</span>'}
                                                         </td>
                                                     `;
-                                                }).join('')}
+                            }).join('')}
                                             </tr>
                                         `;
-                                    }).join('')}
+                        }).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -635,7 +686,7 @@
                     <div class="space-y-6 animate-fade-in-up">
                         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><p class="text-blue-600 text-xs font-bold uppercase">Tổng Chi Phí</p><p class="text-2xl font-bold text-blue-900 mt-1">${formatCurrency(totalSpent)}</p></div>
-                            <div class="bg-purple-50 p-4 rounded-xl border border-purple-200"><p class="text-purple-600 text-xs font-bold uppercase">Bình Quân/Người</p><p class="text-2xl font-bold text-purple-900 mt-1">${formatCurrency(members.length ? totalSpent/members.length : 0)}</p></div>
+                            <div class="bg-purple-50 p-4 rounded-xl border border-purple-200"><p class="text-purple-600 text-xs font-bold uppercase">Bình Quân/Người</p><p class="text-2xl font-bold text-purple-900 mt-1">${formatCurrency(members.length ? totalSpent / members.length : 0)}</p></div>
                             <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><p class="text-amber-600 text-xs font-bold uppercase">Top Chi Tiền</p><p class="text-xl font-bold text-amber-900 mt-1 truncate">${topSpender && topSpender.paid > 0 ? topSpender.name : '---'}</p></div>
                             <div class="bg-green-50 p-4 rounded-xl border border-green-200"><p class="text-green-600 text-xs font-bold uppercase">Top Giao Dịch</p><p class="text-xl font-bold text-green-900 mt-1 truncate">${mostActive && mostActive.txCount > 0 ? mostActive.name : '---'}</p></div>
                         </div>
@@ -816,34 +867,34 @@
         const render = () => {
             if (store.activeTripId) app.innerHTML = renderTripDetail();
             else app.innerHTML = renderTripList();
-            
+
             let modals = renderExpenseModal();
             modals += renderImageSelector();
             modalContainer.innerHTML = modals;
 
             if (window.lucide) window.lucide.createIcons();
-            
+
             // Restore focus
             const quickAdd = document.getElementById('quick-add-input');
             if (quickAdd && store.quickAddText) {
                 quickAdd.focus();
                 quickAdd.selectionStart = quickAdd.selectionEnd = quickAdd.value.length;
             }
-            
+
             // Restore focus report search
             const reportSearch = document.getElementById('report-search');
             if (reportSearch) {
                 reportSearch.focus();
                 reportSearch.selectionStart = reportSearch.selectionEnd = reportSearch.value.length;
             }
-            
+
             // Restore focus to modal inputs
             if (store.expenseModalOpen && document.activeElement && ['ex-desc', 'ex-amount'].includes(document.activeElement.id)) {
                 document.getElementById(document.activeElement.id)?.focus();
             }
             // Restore focus new member
             const newMemberInput = document.getElementById('new-member-input');
-            if(newMemberInput && store.newMemberName) {
+            if (newMemberInput && store.newMemberName) {
                 newMemberInput.focus();
                 newMemberInput.selectionStart = newMemberInput.selectionEnd = newMemberInput.value.length;
             }
@@ -860,33 +911,41 @@
             const id = target.dataset.id;
 
             if (action === 'select-trip') { store.activeTripId = id; store.isReadOnly = false; store.activeTab = 'expenses'; render(); }
-            
-            if (action === 'back-to-list') { 
-                store.activeTripId = null; 
+
+            if (action === 'back-to-list') {
+                store.activeTripId = null;
                 store.isReadOnly = false;
                 try {
                     // Try to safely clean URL in sandbox
                     window.history.pushState("", document.title, window.location.pathname + window.location.search);
-                } catch(err) {
+                } catch (err) {
                     console.warn("Could not pushState (Sandbox mode):", err);
                     window.location.hash = ""; // Fallback
                 }
-                render(); 
+                render();
             }
-            
+
             if (action === 'switch-tab') { store.activeTab = target.dataset.tab; render(); }
-            if (action === 'toggle-create-form') { store.isCreating = !store.isCreating; store.selectedImage = ''; render(); if(store.isCreating) setTimeout(() => document.getElementById('new-trip-input')?.focus(), 50); }
+            if (action === 'toggle-create-form') { store.isCreating = !store.isCreating; store.selectedImage = ''; render(); if (store.isCreating) setTimeout(() => document.getElementById('new-trip-input')?.focus(), 50); }
             if (action === 'cancel-create') { store.isCreating = false; render(); }
-            if (action === 'delete-trip') { 
+            if (action === 'delete-trip') {
                 e.stopPropagation(); // Prevents opening the trip
-                if(confirm("Xóa chuyến đi này?")) await deleteTripFromDB(id); 
+                if (confirm("Xóa chuyến đi này?")) await deleteTripFromDB(id);
             }
-            if (action === 'share-trip') { const trip = store.trips.find(t => t.id === store.activeTripId); const encoded = encodeData(trip); navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#share=${encoded}`); alert("Đã sao chép link chia sẻ!"); }
-            if (action === 'enable-editing') { store.isReadOnly = false; render(); }
-            
-            if (action === 'remove-member') { 
-                if(!confirm("Xóa thành viên này? Các khoản chi liên quan sẽ được tính lại.")) return;
-                const trip = store.trips.find(t => t.id === store.activeTripId); 
+            if (action === 'share-trip') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const encoded = encodeData(trip);                       // ← XÓA
+                navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#share=${encoded}`);
+
+                // Thay bằng:
+                const shareUrl = `${window.location.origin}${window.location.pathname}#trip=${trip.id}`;
+                navigator.clipboard.writeText(shareUrl);
+                alert("Đã sao chép link chia sẻ!\n" + shareUrl);
+            } if (action === 'enable-editing') { store.isReadOnly = false; render(); }
+
+            if (action === 'remove-member') {
+                if (!confirm("Xóa thành viên này? Các khoản chi liên quan sẽ được tính lại.")) return;
+                const trip = store.trips.find(t => t.id === store.activeTripId);
                 const remainingMembers = trip.members.filter(m => m.id !== id);
                 const updatedExpenses = trip.expenses.map(e => {
                     const newInvolved = e.involvedMemberIds ? e.involvedMemberIds.filter(mid => mid !== id) : [];
@@ -901,28 +960,28 @@
                 store.newMemberIcon = target.dataset.value;
                 render();
             }
-            
+
             if (action === 'open-expense-modal') { store.expenseModalOpen = true; store.editingExpenseId = null; const trip = store.trips.find(t => t.id === store.activeTripId); store.expenseForm = { desc: '', amount: '', payerId: '', involvedIds: trip.members.map(m => m.id), icon: 'receipt' }; render(); }
             if (action === 'close-modal') { store.expenseModalOpen = false; render(); }
-            if (action === 'edit-expense') { 
-                const trip = store.trips.find(t => t.id === store.activeTripId); 
-                const expense = trip.expenses.find(e => e.id === id); 
-                store.expenseModalOpen = true; 
-                store.editingExpenseId = id; 
-                store.expenseForm = { 
-                    desc: expense.description, 
-                    amount: expense.amount, 
-                    payerId: expense.payerId, 
+            if (action === 'edit-expense') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const expense = trip.expenses.find(e => e.id === id);
+                store.expenseModalOpen = true;
+                store.editingExpenseId = id;
+                store.expenseForm = {
+                    desc: expense.description,
+                    amount: expense.amount,
+                    payerId: expense.payerId,
                     involvedIds: expense.involvedMemberIds || trip.members.map(m => m.id),
                     icon: expense.categoryIcon || 'receipt'
-                }; 
-                render(); 
+                };
+                render();
             }
-            if (action === 'delete-expense') { if(confirm("Xóa?")) { const trip = store.trips.find(t => t.id === store.activeTripId); const updatedExpenses = trip.expenses.filter(e => e.id !== id); await updateTripInDB({ ...trip, expenses: updatedExpenses }); } }
-            
+            if (action === 'delete-expense') { if (confirm("Xóa?")) { const trip = store.trips.find(t => t.id === store.activeTripId); const updatedExpenses = trip.expenses.filter(e => e.id !== id); await updateTripInDB({ ...trip, expenses: updatedExpenses }); } }
+
             if (action === 'toggle-involved') { const id = target.dataset.id; if (store.expenseForm.involvedIds.includes(id)) store.expenseForm.involvedIds = store.expenseForm.involvedIds.filter(i => i !== id); else store.expenseForm.involvedIds.push(id); render(); }
             if (action === 'toggle-select-all') { const trip = store.trips.find(t => t.id === store.activeTripId); store.expenseForm.involvedIds = store.expenseForm.involvedIds.length === trip.members.length ? [] : trip.members.map(m => m.id); render(); }
-            
+
             if (action === 'select-icon') {
                 store.expenseForm.icon = target.dataset.value;
                 render();
@@ -933,22 +992,22 @@
                 const amount = parseInt(document.getElementById('ex-amount').value);
                 const payerId = document.getElementById('ex-payer').value;
                 if (!desc || isNaN(amount) || !payerId || store.expenseForm.involvedIds.length === 0) { alert("Vui lòng nhập đủ thông tin và chọn ít nhất 1 thành viên."); return; }
-                
+
                 const trip = store.trips.find(t => t.id === store.activeTripId);
                 let updatedExpenses = [...trip.expenses];
-                const expenseData = { 
-                    id: store.editingExpenseId || generateId(), 
-                    description: desc, 
-                    amount, 
-                    payerId, 
-                    date: new Date().toISOString(), 
+                const expenseData = {
+                    id: store.editingExpenseId || generateId(),
+                    description: desc,
+                    amount,
+                    payerId,
+                    date: new Date().toISOString(),
                     involvedMemberIds: store.expenseForm.involvedIds,
-                    categoryIcon: store.expenseForm.icon 
+                    categoryIcon: store.expenseForm.icon
                 };
-                
+
                 if (store.editingExpenseId) updatedExpenses = updatedExpenses.map(e => e.id === store.editingExpenseId ? expenseData : e);
                 else updatedExpenses.unshift(expenseData);
-                
+
                 store.expenseModalOpen = false;
                 await updateTripInDB({ ...trip, expenses: updatedExpenses });
             }
@@ -963,10 +1022,10 @@
                 if (result) {
                     store.expenseModalOpen = true; store.editingExpenseId = null;
                     const payer = trip.members.find(m => m.name.toLowerCase() === result.payerName?.toLowerCase());
-                    store.expenseForm = { 
-                        desc: result.description, 
-                        amount: result.amount, 
-                        payerId: payer?.id || '', 
+                    store.expenseForm = {
+                        desc: result.description,
+                        amount: result.amount,
+                        payerId: payer?.id || '',
                         involvedIds: trip.members.map(m => m.id),
                         icon: result.categoryIcon || 'receipt'
                     };
@@ -999,7 +1058,7 @@
                     } else {
                         // Creating mode
                         // Just update preview state, actual save happens on submit-create-trip
-                         // store.selectedImage is already set. 
+                        // store.selectedImage is already set. 
                     }
                     store.imageSelectionModalOpen = false;
                     render();
@@ -1016,7 +1075,7 @@
                         store.selectedImage = base64;
                         store.customImageFile = base64; // Keep track for confirm
                         render();
-                    } catch(err) {
+                    } catch (err) {
                         console.error(err);
                         alert("Lỗi tải ảnh.");
                     }
@@ -1027,21 +1086,21 @@
         document.addEventListener('submit', async (e) => {
             e.preventDefault();
             const action = e.target.dataset.action;
-            if (action === 'submit-create-trip') { 
-                const name = document.getElementById('new-trip-input').value; 
-                if(name) await createTripInDB(name, store.selectedImage); 
+            if (action === 'submit-create-trip') {
+                const name = document.getElementById('new-trip-input').value;
+                if (name) await createTripInDB(name, store.selectedImage);
             }
-            if (action === 'add-member') { 
+            if (action === 'add-member') {
                 const input = document.getElementById('new-member-input');
-                const name = input.value; 
-                if(name) { 
-                    const trip = store.trips.find(t => t.id === store.activeTripId); 
+                const name = input.value;
+                if (name) {
+                    const trip = store.trips.find(t => t.id === store.activeTripId);
                     store.newMemberName = ''; input.value = ''; input.focus();
                     const newMember = { id: generateId(), name, icon: store.newMemberIcon || 'user' };
                     // Reset icon after adding
                     store.newMemberIcon = 'user';
-                    await updateTripInDB({ ...trip, members: [...trip.members, newMember] }); 
-                } 
+                    await updateTripInDB({ ...trip, members: [...trip.members, newMember] });
+                }
             }
         });
 
@@ -1050,7 +1109,7 @@
             if (e.target.id === 'new-member-input') store.newMemberName = e.target.value;
             if (e.target.id === 'quick-add-input') store.quickAddText = e.target.value;
             if (e.target.id === 'report-search') { store.reportSearchText = e.target.value; render(); }
-            
+
             if (e.target.id === 'ex-desc') store.expenseForm.desc = e.target.value;
             if (e.target.id === 'ex-amount') store.expenseForm.amount = e.target.value ? parseInt(e.target.value) : '';
             if (e.target.id === 'ex-payer') store.expenseForm.payerId = e.target.value;
@@ -1063,4 +1122,5 @@
         initFirebaseListener();
     </script>
 </body>
+
 </html>
