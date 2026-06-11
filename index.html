@@ -377,6 +377,7 @@
                     coverImage: coverImage || getRandomImage(600, 400, name),
                     members: [],
                     expenses: [],
+                    advances: [],
                     createdAt: serverTimestamp()
                 };
                 const docRef = await addDoc(collection(db, TRIPS_COLLECTION), newTrip);
@@ -551,6 +552,7 @@
             if (!trip) return '<div class="p-8 text-center">Không tìm thấy chuyến đi</div>';
 
             const expenses = trip.expenses || [];
+            const advances = trip.advances || [];
             const members = trip.members || [];
             const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
 
@@ -564,6 +566,9 @@
                     const involved = (e.involvedMemberIds && e.involvedMemberIds.length > 0) ? e.involvedMemberIds : members.map(mem => mem.id);
                     if (involved.includes(m.id)) { consumed += e.amount / involved.length; }
                 });
+                    // Include advances: money the member put into the common pool (counts as paid)
+                    const advForMember = advances.filter(a => a.memberId === m.id).reduce((s, a) => s + (a.amount || 0), 0);
+                    paid += advForMember;
                 return { ...m, paid, consumed, balance: paid - consumed, txCount };
             }).sort((a, b) => a.balance - b.balance);
 
@@ -781,16 +786,25 @@
                     </form>` : ''}
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        ${members.map(m => `
+                        ${members.map(m => {
+                            const advForMember = advances.filter(a => a.memberId === m.id).reduce((s, a) => s + (a.amount || 0), 0);
+                            return `
                         <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-indigo-600">
                                     <i data-lucide="${m.icon || 'user'}" class="w-5 h-5"></i>
                                 </div>
-                                <span class="font-medium">${m.name}</span>
+                                <div class="flex flex-col">
+                                    <span class="font-medium">${m.name}</span>
+                                    <span class="text-xs text-gray-500">Ứng trước: ${formatCurrency(advForMember)}</span>
+                                </div>
                             </div>
-                            ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
-                        </div>`).join('')}
+                            <div class="flex items-center gap-2">
+                                ${!store.isReadOnly ? `<button data-action="add-advance" data-id="${m.id}" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-md text-sm">Ứng tiền</button>` : ''}
+                                ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                            </div>
+                        </div>`;
+                        }).join('')}
                     </div>
                 </div>`;
 
@@ -999,6 +1013,20 @@
                     return { ...e, payerId: newPayerId, involvedMemberIds: newInvolved };
                 });
                 await updateTripInDB({ ...trip, members: remainingMembers, expenses: updatedExpenses });
+            }
+
+            if (action === 'add-advance') {
+                const memberId = target.dataset.id;
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                if (!trip) return;
+                const raw = prompt('Nhập số tiền ứng (VNĐ) cho ' + (trip.members.find(m => m.id === memberId)?.name || 'thành viên') + ':', '0');
+                if (!raw) return;
+                const amount = parseInt(raw.replace(/[^0-9-]/g, '')) || 0;
+                if (amount <= 0) { alert('Vui lòng nhập số tiền hợp lệ.'); return; }
+                const advance = { id: generateId(), memberId, amount, date: new Date().toISOString(), note: '' };
+                const updatedAdv = [...(trip.advances || [])];
+                updatedAdv.unshift(advance);
+                await updateTripInDB({ ...trip, advances: updatedAdv });
             }
 
             if (action === 'select-member-icon') {
