@@ -146,13 +146,10 @@
 
     <!-- Main Logic Script (Inlined to fix CORS issues) -->
     <script type="module">
-        import { initializeApp } from "firebase/app";
-        import {
-            initializeFirestore, collection, onSnapshot,
-            addDoc, doc, updateDoc, deleteDoc,
-            serverTimestamp
-        } from "firebase/firestore";
-        import { GoogleGenAI, Type } from "@google/genai";
+        // We'll load Firebase and Google GenAI dynamically to avoid CORS/import errors
+        // when opening the file locally (file://) or when these libs are not needed.
+        let initializeApp, initializeFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp;
+        let GoogleGenAI, Type;
 
         // --- FIREBASE CONFIG ---
         const firebaseConfig = {
@@ -164,21 +161,35 @@
             appId: "1:277993628196:web:37ba3db909a6d5398e6eb1"
         };
 
-        // Initialize Firebase
+        // Initialize Firebase (dynamically)
         let db;
-        try {
-            const firebaseApp = initializeApp(firebaseConfig);
-            console.log("Firebase App initialized:", firebaseApp.name);
+        (async () => {
+            try {
+                if (typeof initializeApp === 'undefined' || !initializeApp) {
+                    const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
+                    const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
+                    initializeApp = fbApp.initializeApp;
+                    initializeFirestore = fbFire.initializeFirestore;
+                    collection = fbFire.collection;
+                    onSnapshot = fbFire.onSnapshot;
+                    addDoc = fbFire.addDoc;
+                    doc = fbFire.doc;
+                    updateDoc = fbFire.updateDoc;
+                    deleteDoc = fbFire.deleteDoc;
+                    serverTimestamp = fbFire.serverTimestamp;
+                }
 
-            // Initialize Firestore with settings optimized for basic web usage
-            db = initializeFirestore(firebaseApp, {
-                // Default settings work best for CDN usage
-            });
-        } catch (e) {
-            console.error("Firebase Initialization Error:", e);
-            const loaderText = document.getElementById('loader-text');
-            if (loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
-        }
+                const firebaseApp = initializeApp(firebaseConfig);
+                console.log("Firebase App initialized:", firebaseApp.name);
+                db = initializeFirestore(firebaseApp, {
+                    // Default settings work best for CDN usage
+                });
+            } catch (e) {
+                console.error("Firebase Initialization Error:", e);
+                const loaderText = document.getElementById('loader-text');
+                if (loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
+            }
+        })();
 
         const TRIPS_COLLECTION = 'trips';
 
@@ -263,12 +274,35 @@
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
             const loaderText = document.getElementById('loader-text');
+            // Dynamic import Firebase modules when initializing listener
+            const ensureFirebase = async () => {
+                if (typeof initializeApp === 'undefined' || !initializeApp) {
+                    try {
+                        const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
+                        const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
+                        initializeApp = fbApp.initializeApp;
+                        initializeFirestore = fbFire.initializeFirestore;
+                        collection = fbFire.collection;
+                        onSnapshot = fbFire.onSnapshot;
+                        addDoc = fbFire.addDoc;
+                        doc = fbFire.doc;
+                        updateDoc = fbFire.updateDoc;
+                        deleteDoc = fbFire.deleteDoc;
+                        serverTimestamp = fbFire.serverTimestamp;
+                    } catch (err) {
+                        console.warn('Firebase dynamic import failed:', err);
+                        // Leave db undefined and fallback to offline UI
+                    }
+                }
+            };
 
-            if (!db) {
-                render();
-                if (loader) loader.classList.add('hidden-loader');
-                return;
-            }
+            (async () => { await ensureFirebase();
+                if (!db) {
+                    render();
+                    if (loader) loader.classList.add('hidden-loader');
+                    return;
+                }
+            })();
 
             const q = collection(db, TRIPS_COLLECTION);
 
@@ -381,7 +415,18 @@
                 return null;
             }
             try {
-                const ai = new GoogleGenAI({ apiKey: API_KEY });
+                // Dynamically load Google GenAI SDK to avoid loading it on initial page load
+                if (typeof GoogleGenAI === 'undefined' || !GoogleGenAI) {
+                    try {
+                        const gen = await import('https://esm.sh/@google/genai');
+                        GoogleGenAI = gen.GoogleGenAI || gen.default?.GoogleGenAI || gen.default || gen.Google || gen;
+                        Type = gen.Type || (gen.default && gen.default.Type) || Type;
+                    } catch (err) {
+                        console.warn('GenAI dynamic import failed:', err);
+                    }
+                }
+                const ai = new GoogleGenAI ? new GoogleGenAI({ apiKey: API_KEY }) : null;
+                if (!ai) { alert('Không thể tải module AI.'); return null; }
                 const prompt = `
                 Phân tích chi tiêu: "${text}".
                 Thành viên: ${memberNames.join(", ")}.
