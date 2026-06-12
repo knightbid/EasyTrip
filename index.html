@@ -148,7 +148,7 @@
     <script type="module">
         // We'll load Firebase and Google GenAI dynamically to avoid CORS/import errors
         // when opening the file locally (file://) or when these libs are not needed.
-        let initializeApp, initializeFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp;
+        let initializeApp, getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp;
         let GoogleGenAI, Type;
 
         // --- FIREBASE CONFIG ---
@@ -169,7 +169,7 @@
                     const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
                     const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
                     initializeApp = fbApp.initializeApp;
-                    initializeFirestore = fbFire.initializeFirestore;
+                    getFirestore = fbFire.getFirestore || fbFire.initializeFirestore;
                     collection = fbFire.collection;
                     onSnapshot = fbFire.onSnapshot;
                     addDoc = fbFire.addDoc;
@@ -181,9 +181,8 @@
 
                 const firebaseApp = initializeApp(firebaseConfig);
                 console.log("Firebase App initialized:", firebaseApp.name);
-                db = initializeFirestore(firebaseApp, {
-                    // Default settings work best for CDN usage
-                });
+                // Use getFirestore if available (modular SDK)
+                db = (getFirestore && typeof getFirestore === 'function') ? getFirestore(firebaseApp) : null;
             } catch (e) {
                 console.error("Firebase Initialization Error:", e);
                 const loaderText = document.getElementById('loader-text');
@@ -274,14 +273,15 @@
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
             const loaderText = document.getElementById('loader-text');
-            // Dynamic import Firebase modules when initializing listener
+            // Dynamic import Firebase modules when initializing listener and run Firestore logic after ready
             const ensureFirebase = async () => {
                 if (typeof initializeApp === 'undefined' || !initializeApp) {
                     try {
                         const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
                         const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
                         initializeApp = fbApp.initializeApp;
-                        initializeFirestore = fbFire.initializeFirestore;
+                        // Use getFirestore for browser SDK
+                        getFirestore = fbFire.getFirestore || fbFire.initializeFirestore;
                         collection = fbFire.collection;
                         onSnapshot = fbFire.onSnapshot;
                         addDoc = fbFire.addDoc;
@@ -294,50 +294,62 @@
                         // Leave db undefined and fallback to offline UI
                     }
                 }
+
+                // If imports succeeded but db not initialized yet, initialize app and db here
+                try {
+                    if (!db && typeof initializeApp === 'function' && typeof getFirestore === 'function') {
+                        const firebaseApp = initializeApp(firebaseConfig);
+                        db = getFirestore(firebaseApp);
+                        console.log('Firebase initialized inside ensureFirebase');
+                    }
+                } catch (err) {
+                    console.warn('Failed to initialize Firebase in ensureFirebase:', err);
+                }
             };
 
-            (async () => { await ensureFirebase();
+            (async () => {
+                await ensureFirebase();
                 if (!db) {
                     render();
                     if (loader) loader.classList.add('hidden-loader');
                     return;
                 }
+
+                const q = collection(db, TRIPS_COLLECTION);
+
+                const safetyTimeout = setTimeout(() => {
+                    if (loader && !loader.classList.contains('hidden-loader')) {
+                        loaderText.innerText = "Kết nối chậm. Đang vào chế độ offline...";
+                        setTimeout(() => {
+                            render();
+                            loader.classList.add('hidden-loader');
+                        }, 1000);
+                    }
+                }, 5000);
+
+                onSnapshot(q, (snapshot) => {
+                    clearTimeout(safetyTimeout);
+                    const tripsData = [];
+                    snapshot.forEach((doc) => {
+                        tripsData.push({ id: doc.id, ...doc.data() });
+                    });
+
+                    store.trips = tripsData.sort((a, b) => {
+                        const timeA = a.createdAt?.seconds || 0;
+                        const timeB = b.createdAt?.seconds || 0;
+                        return timeB - timeA;
+                    });
+
+                    checkShareLink();
+                    render();
+                    if (loader) loader.classList.add('hidden-loader');
+                }, (error) => {
+                    clearTimeout(safetyTimeout);
+                    console.error("Firebase Error:", error);
+                    render();
+                    if (loader) loader.classList.add('hidden-loader');
+                });
             })();
-
-            const q = collection(db, TRIPS_COLLECTION);
-
-            const safetyTimeout = setTimeout(() => {
-                if (loader && !loader.classList.contains('hidden-loader')) {
-                    loaderText.innerText = "Kết nối chậm. Đang vào chế độ offline...";
-                    setTimeout(() => {
-                        render();
-                        loader.classList.add('hidden-loader');
-                    }, 1000);
-                }
-            }, 5000);
-
-            onSnapshot(q, (snapshot) => {
-                clearTimeout(safetyTimeout);
-                const tripsData = [];
-                snapshot.forEach((doc) => {
-                    tripsData.push({ id: doc.id, ...doc.data() });
-                });
-
-                store.trips = tripsData.sort((a, b) => {
-                    const timeA = a.createdAt?.seconds || 0;
-                    const timeB = b.createdAt?.seconds || 0;
-                    return timeB - timeA;
-                });
-
-                checkShareLink();
-                render();
-                if (loader) loader.classList.add('hidden-loader');
-            }, (error) => {
-                clearTimeout(safetyTimeout);
-                console.error("Firebase Error:", error);
-                render();
-                if (loader) loader.classList.add('hidden-loader');
-            });
         };
 
         const checkShareLink = () => {
@@ -601,6 +613,7 @@
                         <div class="absolute right-1 top-1 bottom-1 flex items-center gap-1">
                             <button data-action="ai-quick-add" class="rounded-full h-full px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white disabled:opacity-50">${store.isAnalyzing ? '<i data-lucide="loader-2" class="animate-spin w-4 h-4"></i>' : '<i data-lucide="sparkles" class="w-4 h-4"></i>'}</button>
                             <button data-action="open-expense-modal" class="rounded-full h-full w-10 bg-gray-100 hover:bg-gray-200"><i data-lucide="plus" class="w-5 h-5 mx-auto"></i></button>
+                            <button data-action="advance-prompt" class="rounded-full h-full px-3 bg-amber-500 text-white hover:bg-amber-600" title="Ứng tiền">Ứng tiền</button>
                         </div>
                     </div></div>` : '';
                 return `<div>${quickAdd} <div class="space-y-4">${list}</div></div>`;
@@ -1067,19 +1080,35 @@
                 if (!desc || isNaN(amount) || !payerId || store.expenseForm.involvedIds.length === 0) { alert("Vui lòng nhập đủ thông tin và chọn ít nhất 1 thành viên."); return; }
 
                 const trip = store.trips.find(t => t.id === store.activeTripId);
+                // Special handling: if description starts with 'Ứng tiền', create one expense per involved member
                 let updatedExpenses = [...trip.expenses];
-                const expenseData = {
-                    id: store.editingExpenseId || generateId(),
-                    description: desc,
-                    amount,
-                    payerId,
-                    date: new Date().toISOString(),
-                    involvedMemberIds: store.expenseForm.involvedIds,
-                    categoryIcon: store.expenseForm.icon
-                };
+                if (desc && desc.startsWith('Ứng tiền')) {
+                    const perMember = store.expenseForm.involvedIds.map(mid => {
+                        return {
+                            id: generateId(),
+                            description: `Ứng tiền — ${trip.members.find(m=>m.id===mid)?.name || ''}`,
+                            amount: amount,
+                            payerId: mid,
+                            date: new Date().toISOString(),
+                            involvedMemberIds: store.expenseForm.involvedIds,
+                            categoryIcon: store.expenseForm.icon
+                        };
+                    });
+                    updatedExpenses = [...perMember, ...updatedExpenses];
+                } else {
+                    const expenseData = {
+                        id: store.editingExpenseId || generateId(),
+                        description: desc,
+                        amount,
+                        payerId,
+                        date: new Date().toISOString(),
+                        involvedMemberIds: store.expenseForm.involvedIds,
+                        categoryIcon: store.expenseForm.icon
+                    };
 
-                if (store.editingExpenseId) updatedExpenses = updatedExpenses.map(e => e.id === store.editingExpenseId ? expenseData : e);
-                else updatedExpenses.unshift(expenseData);
+                    if (store.editingExpenseId) updatedExpenses = updatedExpenses.map(e => e.id === store.editingExpenseId ? expenseData : e);
+                    else updatedExpenses.unshift(expenseData);
+                }
 
                 store.expenseModalOpen = false;
                 await updateTripInDB({ ...trip, expenses: updatedExpenses });
@@ -1103,6 +1132,22 @@
                         icon: result.categoryIcon || 'receipt'
                     };
                 }
+                render();
+            }
+
+            if (action === 'advance-prompt') {
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                if (!trip) return;
+                // Open expense modal prefilled for an advance. User can pick payer in modal.
+                store.expenseModalOpen = true;
+                store.editingExpenseId = null;
+                store.expenseForm = {
+                    desc: 'Ứng tiền — ',
+                    amount: '',
+                    payerId: trip.members[0]?.id || '',
+                    involvedIds: trip.members.map(m => m.id),
+                    icon: 'receipt'
+                };
                 render();
             }
 
