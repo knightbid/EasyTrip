@@ -557,7 +557,7 @@
                                 <label class="block text-sm font-medium text-gray-700">Ảnh bìa (Tùy chọn)</label>
                                 <div class="flex gap-4 items-end">
                                     <div class="w-32 h-20 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 relative group">
-                                         <img id="preview-new-cover" src="${store.selectedImage || 'https://via.placeholder.com/150?text=Auto'}" class="w-full h-full object-cover" />
+                                         <img id="preview-new-cover" src="${store.selectedImage || 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"150\" height=\"80\"><rect width=\"100%\" height=\"100%\" fill=\"#f1f5f9\"/><text x=\"50%\" y=\"50%\" dominant-baseline=\"central\" text-anchor=\"middle\" fill=\"#94a3b8\" font-size=\"14\" font-family=\"Arial,sans-serif\">Auto</text></svg>')}" class="w-full h-full object-cover" onerror="this.src=FALLBACK_IMAGE" />
                                          <button type="button" data-action="open-image-selector" class="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"><i data-lucide="image" class="w-6 h-6"></i></button>
                                     </div>
                                     <div class="text-xs text-gray-500 pb-1">Bấm vào ảnh để thay đổi</div>
