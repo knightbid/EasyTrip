@@ -578,8 +578,8 @@
         const renderTripDetail = () => {
             const trip = store.trips.find(t => t.id === store.activeTripId);
 if (!trip) {
-return `         <div class="p-8 text-center">             <div class="text-6xl mb-4">🦖</div>             <div>Không tìm thấy chuyến đi.</div>             <div class="text-sm text-gray-500 mt-2">
-                Khủng long đã chạy hết đường ray.             </div>         </div>
+return `         <div class="p-8 text-center">             <div class="text-6xl mb-4">🦖</div>                     <div class="text-sm text-gray-500 mt-2">
+                Khủng long đang chạy.             </div>         </div>
     `;
 }
 
