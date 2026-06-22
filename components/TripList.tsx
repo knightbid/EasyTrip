@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Trip } from '../types';
 import { Button } from './Button';
 import { Plus, Calendar, Users, Trash2 } from 'lucide-react';
-import { getRandomImage, generateId } from '../services/utils';
+import { getRandomImage, generateId, FALLBACK_IMAGE } from '../services/utils';
 
 interface TripListProps {
   trips: Trip[];
@@ -75,6 +75,7 @@ export const TripList: React.FC<TripListProps> = ({ trips, onSelectTrip, onCreat
                   src={trip.coverImage} 
                   alt={trip.name} 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_IMAGE; }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                 <h3 className="absolute bottom-3 left-4 text-xl font-bold text-white shadow-black/50 drop-shadow-md">

@@ -225,9 +225,30 @@
 
         const generateId = () => Math.random().toString(36).substring(2, 9);
 
-        const getRandomImage = (width, height, seed) => {
-            return `https://picsum.photos/seed/${seed}/${width}/${height}`;
+        const seedToHue = (seed) => {
+            let hash = 0;
+            for (let i = 0; i < seed.length; i++) {
+                hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return Math.abs(hash) % 360;
         };
+
+        const getRandomImage = (width, height, seed) => {
+            const hue = seedToHue(seed);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+                <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="hsl(${hue},55%,65%)"/>
+                    <stop offset="100%" stop-color="hsl(${(hue + 40) % 360},55%,45%)"/>
+                </linearGradient></defs>
+                <rect width="100%" height="100%" fill="url(#g)"/>
+                <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" fill="white" font-size="28" font-family="Arial,sans-serif" font-weight="bold">${seed}</text>
+            </svg>`;
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        };
+
+        const FALLBACK_IMAGE = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="100%" height="100%" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" fill="#94a3b8" font-size="20" font-family="Arial,sans-serif">No Image</text></svg>'
+        )}`;
 
         const encodeData = (data) => {
             try {
@@ -273,6 +294,12 @@
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
             const loaderText = document.getElementById('loader-text');
+
+            // Show the page immediately while Firebase loads in background
+            checkShareLink();
+            render();
+            if (loader) loader.classList.add('hidden-loader');
+
             // Dynamic import Firebase modules when initializing listener and run Firestore logic after ready
             const ensureFirebase = async () => {
                 if (typeof initializeApp === 'undefined' || !initializeApp) {
@@ -310,22 +337,14 @@
             (async () => {
                 await ensureFirebase();
                 if (!db) {
-                    render();
-                    if (loader) loader.classList.add('hidden-loader');
                     return;
                 }
 
                 const q = collection(db, TRIPS_COLLECTION);
 
                 const safetyTimeout = setTimeout(() => {
-                    if (loader && !loader.classList.contains('hidden-loader')) {
-                        loaderText.innerText = "Kết nối chậm. Đang vào chế độ offline...";
-                        setTimeout(() => {
-                            render();
-                            loader.classList.add('hidden-loader');
-                        }, 1000);
-                    }
-                }, 5000);
+                    console.warn("Firestore connection timeout — staying with offline UI");
+                }, 3000);
 
                 onSnapshot(q, (snapshot) => {
                     clearTimeout(safetyTimeout);
@@ -342,12 +361,9 @@
 
                     checkShareLink();
                     render();
-                    if (loader) loader.classList.add('hidden-loader');
                 }, (error) => {
                     clearTimeout(safetyTimeout);
                     console.error("Firebase Error:", error);
-                    render();
-                    if (loader) loader.classList.add('hidden-loader');
                 });
             })();
         };
@@ -504,7 +520,7 @@
                 : store.trips.map(trip => `
                     <div class="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden border border-gray-200 flex flex-col h-full">
                         <div class="relative h-40 overflow-hidden cursor-pointer" data-action="select-trip" data-id="${trip.id}">
-                            <img src="${trip.coverImage}" alt="${trip.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            <img src="${trip.coverImage}" alt="${trip.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.src=FALLBACK_IMAGE" />
                             <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                             <h3 class="absolute bottom-3 left-4 text-xl font-bold text-white shadow-black/50 drop-shadow-md">${trip.name}</h3>
                         </div>
@@ -836,7 +852,7 @@
                         <button data-action="back-to-list" class="text-gray-500 hover:text-indigo-600 flex items-center mb-4"><i data-lucide="arrow-left" class="w-4 h-4 mr-1"></i> Quay lại</button>
                         <div class="bg-white rounded-2xl shadow-md overflow-hidden relative group">
                             <div class="h-48 w-full relative">
-                                <img src="${trip.coverImage}" class="w-full h-full object-cover" />
+                                <img src="${trip.coverImage}" class="w-full h-full object-cover" onerror="this.src=FALLBACK_IMAGE" />
                                 <div class="absolute inset-0 bg-black/30 flex items-end p-6">
                                     <div><h1 class="text-3xl font-bold text-white mb-1">${trip.name}</h1><p class="text-white/90 text-sm flex items-center gap-2"><i data-lucide="users" class="w-4 h-4"></i> ${members.length} thành viên • Tổng chi: <span class="font-bold text-green-300">${formatCurrency(totalSpent)}</span></p></div>
                                 </div>
@@ -914,7 +930,7 @@
                                 <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
                                     ${GALLERIES.map(url => `
                                         <div class="relative aspect-video rounded-lg overflow-hidden cursor-pointer group" data-action="select-gallery-image" data-url="${url}">
-                                            <img src="${url}" class="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                                            <img src="${url}" class="w-full h-full object-cover group-hover:scale-110 transition-transform" onerror="this.src=FALLBACK_IMAGE" />
                                             ${store.selectedImage === url ? '<div class="absolute inset-0 bg-indigo-600/40 flex items-center justify-center"><i data-lucide="check" class="text-white w-8 h-8"></i></div>' : ''}
                                         </div>
                                     `).join('')}
@@ -987,12 +1003,12 @@
             if (action === 'back-to-list') {
                 store.activeTripId = null;
                 store.isReadOnly = false;
-                try {
-                    // Try to safely clean URL in sandbox
-                    window.history.pushState("", document.title, window.location.pathname + window.location.search);
-                } catch (err) {
-                    console.warn("Could not pushState (Sandbox mode):", err);
-                    window.location.hash = ""; // Fallback
+                if (window.location.protocol !== 'file:') {
+                    try {
+                        window.history.pushState("", document.title, window.location.pathname + window.location.search);
+                    } catch (err) {
+                        console.warn("Could not pushState:", err);
+                    }
                 }
                 render();
             }
@@ -1006,11 +1022,8 @@
             }
             if (action === 'share-trip') {
                 const trip = store.trips.find(t => t.id === store.activeTripId);
-                const encoded = encodeData(trip);                       // ← XÓA
-                navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#share=${encoded}`);
-
-                // Thay bằng:
-                const shareUrl = `${window.location.origin}${window.location.pathname}#trip=${trip.id}`;
+                const baseUrl = window.location.href.split('#')[0];
+                const shareUrl = `${baseUrl}#trip=${trip.id}`;
                 navigator.clipboard.writeText(shareUrl);
                 alert("Đã sao chép link chia sẻ!\n" + shareUrl);
             } if (action === 'enable-editing') { store.isReadOnly = false; render(); }
