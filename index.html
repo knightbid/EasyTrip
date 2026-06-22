@@ -300,6 +300,20 @@
             render();
             if (loader) loader.classList.add('hidden-loader');
 
+            // Overall timeout: if Firebase hasn't responded in 5s, re-render anyway
+            let firebaseResolved = false;
+            const safetyTimeout = setTimeout(() => {
+                if (!firebaseResolved) {
+                    checkShareLink();
+                    render();
+                }
+            }, 5000);
+
+            const finish = () => {
+                firebaseResolved = true;
+                clearTimeout(safetyTimeout);
+            };
+
             // Dynamic import Firebase modules when initializing listener and run Firestore logic after ready
             const ensureFirebase = async () => {
                 if (typeof initializeApp === 'undefined' || !initializeApp) {
@@ -337,17 +351,14 @@
             (async () => {
                 await ensureFirebase();
                 if (!db) {
+                    finish();
                     return;
                 }
 
                 const q = collection(db, TRIPS_COLLECTION);
 
-                const safetyTimeout = setTimeout(() => {
-                    console.warn("Firestore connection timeout — staying with offline UI");
-                }, 3000);
-
                 onSnapshot(q, (snapshot) => {
-                    clearTimeout(safetyTimeout);
+                    finish();
                     const tripsData = [];
                     snapshot.forEach((doc) => {
                         tripsData.push({ id: doc.id, ...doc.data() });
@@ -362,8 +373,10 @@
                     checkShareLink();
                     render();
                 }, (error) => {
-                    clearTimeout(safetyTimeout);
+                    finish();
                     console.error("Firebase Error:", error);
+                    checkShareLink();
+                    render();
                 });
             })();
         };
