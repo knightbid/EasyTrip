@@ -279,6 +279,8 @@
             newTripName: '',
             newMemberName: '',
             newMemberIcon: 'user', // Default icon
+            newChildRate: null, // null = adult, 0.5 = 1/2, 0.25 = 1/4
+            editingChildMemberId: null,
             quickAddText: '',
             isAnalyzing: false,
             reportSearchText: '',
@@ -602,6 +604,8 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
             const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
 
             // Calculate Stats
+            const getMemberWeight = (mem) => mem.childRate || 1;
+
             const memberStats = members.map(m => {
                 let paid = 0;
                 let consumed = 0;
@@ -609,7 +613,13 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 expenses.forEach(e => {
                     if (e.payerId === m.id) { paid += e.amount; txCount++; }
                     const involved = (e.involvedMemberIds && e.involvedMemberIds.length > 0) ? e.involvedMemberIds : members.map(mem => mem.id);
-                    if (involved.includes(m.id)) { consumed += e.amount / involved.length; }
+                    if (involved.includes(m.id)) {
+                        const totalWeight = involved.reduce((sum, mid) => {
+                            const mem = members.find(member => member.id === mid);
+                            return sum + getMemberWeight(mem);
+                        }, 0);
+                        consumed += e.amount * (getMemberWeight(m) / totalWeight);
+                    }
                 });
                     // Include advances: money the member put into the common pool (counts as paid)
                     const advForMember = advances.filter(a => a.memberId === m.id).reduce((s, a) => s + (a.amount || 0), 0);
@@ -755,10 +765,15 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                                     <div class="text-[10px] text-gray-400 font-normal mt-0.5 ml-5">${new Date(e.date).toLocaleDateString('vi-VN')}</div>
                                                 </td>
                                                 <td class="px-4 py-3 text-right text-indigo-600 font-medium whitespace-nowrap">${formatCurrency(e.amount)}</td>
-                                                ${members.map(m => {
-                                const isInvolved = involved.includes(m.id);
-                                const splitAmount = e.amount / involved.length;
-                                return `
+                                                ${(() => {
+                                const totalWeight = involved.reduce((sum, mid) => {
+                                    const mem = members.find(member => member.id === mid);
+                                    return sum + (mem.childRate || 1);
+                                }, 0);
+                                return members.map(m => {
+                                    const isInvolved = involved.includes(m.id);
+                                    const splitAmount = isInvolved ? e.amount * ((m.childRate || 1) / totalWeight) : 0;
+                                    return `
                                                         <td class="px-4 py-3 text-center border-l border-gray-100">
                                                             ${isInvolved
                                         ? `<div class="flex flex-col items-center group/cell">
@@ -768,7 +783,8 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                         : '<span class="text-gray-200 text-lg">-</span>'}
                                                         </td>
                                                     `;
-                            }).join('')}
+                                }).join('');
+                            })()}
                                             </tr>
                                         `;
                         }).join('')}
@@ -822,6 +838,23 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                      `).join('')}
                                  </div>
                             </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-2">Loại thành viên</label>
+                                <div class="flex gap-2 flex-wrap">
+                                    <button type="button" data-action="set-child-rate" data-value="" 
+                                        class="px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${!store.newChildRate ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}">
+                                        Người lớn
+                                    </button>
+                                    <button type="button" data-action="set-child-rate" data-value="0.5" 
+                                        class="px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${store.newChildRate === 0.5 ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}">
+                                        Trẻ em (1/2)
+                                    </button>
+                                    <button type="button" data-action="set-child-rate" data-value="0.25" 
+                                        class="px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${store.newChildRate === 0.25 ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}">
+                                        Trẻ em (1/4)
+                                    </button>
+                                </div>
+                            </div>
                             <div class="flex gap-2">
                                 <input type="text" id="new-member-input" value="${store.newMemberName}" placeholder="Tên thành viên..." class="flex-1 rounded-md border border-gray-300 p-2 shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                                 <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 font-medium flex items-center gap-2">
@@ -842,12 +875,21 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                 </div>
                                 <div class="flex flex-col">
                                     <span class="font-medium">${m.name}</span>
+                                    ${m.childRate ? `<span class="text-xs text-amber-600 font-medium">Trẻ em (1/${m.childRate === 0.5 ? '2' : '4'})</span>` : ''}
                                     <span class="text-xs text-gray-500">Ứng trước: ${formatCurrency(advForMember)}</span>
                                 </div>
                             </div>
-                            <div class="flex items-center gap-2">
-                                ${!store.isReadOnly ? `<button data-action="add-advance" data-id="${m.id}" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-md text-sm">Ứng tiền</button>` : ''}
-                                ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                                <div class="flex items-center gap-2">
+                                ${store.editingChildMemberId === m.id ? `
+                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="" class="px-2 py-1 rounded text-xs font-medium border ${!m.childRate ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">Lớn</button>
+                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="0.5" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.5 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/2</button>
+                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="0.25" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.25 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/4</button>
+                                    <button data-action="cancel-edit-child" class="text-gray-400 hover:text-gray-600 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+                                ` : `
+                                    ${!store.isReadOnly ? `<button data-action="edit-child-rate" data-id="${m.id}" class="text-gray-400 hover:text-indigo-500 p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Sửa loại thành viên"><i data-lucide="edit-2" class="w-4 h-4"></i></button>` : ''}
+                                    ${!store.isReadOnly ? `<button data-action="add-advance" data-id="${m.id}" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-md text-sm">Ứng tiền</button>` : ''}
+                                    ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                                `}
                             </div>
                         </div>`;
                         }).join('')}
@@ -924,7 +966,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                         </div>
                                     </div>
 
-                                    <div><div class="flex justify-between items-center mb-2"><label class="block text-sm font-medium text-gray-700">Thành viên tham gia</label><button data-action="toggle-select-all" class="text-xs text-indigo-600 font-medium hover:underline">${involvedIds.length === members.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button></div><div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">${members.map(m => { const isSelected = involvedIds.includes(m.id); return `<button type="button" data-action="toggle-involved" data-id="${m.id}" class="px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${isSelected ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200'}">${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''} <span class="flex items-center gap-1"><i data-lucide="${m.icon || 'user'}" class="w-3 h-3"></i> ${m.name}</span></button>`; }).join('')}</div></div>
+                                    <div><div class="flex justify-between items-center mb-2"><label class="block text-sm font-medium text-gray-700">Thành viên tham gia</label><button data-action="toggle-select-all" class="text-xs text-indigo-600 font-medium hover:underline">${involvedIds.length === members.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button></div><div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">${members.map(m => { const isSelected = involvedIds.includes(m.id); return `<button type="button" data-action="toggle-involved" data-id="${m.id}" class="px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${isSelected ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200'}">${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''} <span class="flex items-center gap-1"><i data-lucide="${m.icon || 'user'}" class="w-3 h-3"></i> ${m.name}</span>${m.childRate ? `<span class="text-[10px] text-amber-500 ml-0.5">(1/${m.childRate === 0.5 ? '2' : '4'})</span>` : ''}</button>`; }).join('')}</div></div>
                                 </div>
                             </div>
                             <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse"><button type="button" data-action="save-expense" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm">Lưu</button><button type="button" data-action="close-modal" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Hủy</button></div>
@@ -1075,6 +1117,32 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
             if (action === 'select-member-icon') {
                 store.newMemberIcon = target.dataset.value;
                 render();
+            }
+
+            if (action === 'set-child-rate') {
+                const val = target.dataset.value;
+                store.newChildRate = val === '' ? null : parseFloat(val);
+                render();
+            }
+
+            if (action === 'edit-child-rate') {
+                store.editingChildMemberId = target.dataset.id;
+                render();
+            }
+
+            if (action === 'cancel-edit-child') {
+                store.editingChildMemberId = null;
+                render();
+            }
+
+            if (action === 'save-child-rate') {
+                const memberId = target.dataset.id;
+                const val = target.dataset.value;
+                const newRate = val === '' ? null : parseFloat(val);
+                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const updatedMembers = trip.members.map(m => m.id === memberId ? { ...m, childRate: newRate } : m);
+                store.editingChildMemberId = null;
+                await updateTripInDB({ ...trip, members: updatedMembers });
             }
 
             if (action === 'open-expense-modal') { store.expenseModalOpen = true; store.editingExpenseId = null; const trip = store.trips.find(t => t.id === store.activeTripId); store.expenseForm = { desc: '', amount: '', payerId: '', involvedIds: trip.members.map(m => m.id), icon: 'receipt' }; render(); }
@@ -1244,9 +1312,10 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 if (name) {
                     const trip = store.trips.find(t => t.id === store.activeTripId);
                     store.newMemberName = ''; input.value = ''; input.focus();
-                    const newMember = { id: generateId(), name, icon: store.newMemberIcon || 'user' };
-                    // Reset icon after adding
+                    const newMember = { id: generateId(), name, icon: store.newMemberIcon || 'user', childRate: store.newChildRate };
+                    // Reset icon and child rate after adding
                     store.newMemberIcon = 'user';
+                    store.newChildRate = null;
                     await updateTripInDB({ ...trip, members: [...trip.members, newMember] });
                 }
             }
