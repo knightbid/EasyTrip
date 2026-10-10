@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Firestore Security Rules cho EasyTrip (TripSplit AI)
+// Triển khai:  firebase deploy --only firestore:rules
+//
+// LƯU Ý QUAN TRỌNG:
+// - App đăng nhập ẩn danh (anonymous auth). Phải bật provider "Anonymous"
+//   trong Firebase Console -> Authentication -> Sign-in method trước khi deploy rules này.
+// - Reads để public (để link chia sẻ #trip=<id> xem được ở chế độ read-only).
+// - Mọi thao tác ghi đều yêu cầu đã đăng nhập + dữ liệu đúng cấu trúc.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidTrip(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.coverImage is string
+        && data.coverImage.size() <= 1500000
+        && data.members is list
+        && data.members.size() <= 100
+        && data.expenses is list
+        && data.expenses.size() <= 2000
+        && (!('advances' in data) || (data.advances is list && data.advances.size() <= 2000));
+    }
+
+    match /trips/{tripId} {
+      // Ai có link cũng xem được (chia sẻ read-only)
+      allow read: if true;
+
+      // Chỉ người đã đăng nhập (kể cả ẩn danh) mới được tạo/sửa/xóa
+      allow create: if request.auth != null
+        && isValidTrip(request.resource.data);
+
+      allow update: if request.auth != null
+        && isValidTrip(request.resource.data);
+
+      allow delete: if request.auth != null;
+    }
+
+    // Chặn mọi truy cập khác theo mặc định
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
