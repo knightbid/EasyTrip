@@ -1,1 +1,0 @@
-// Logic moved to index.html to resolve CORS issues in the current environment.

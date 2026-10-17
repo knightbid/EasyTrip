@@ -6,11 +6,25 @@ rules_version = '2';
 // LƯU Ý QUAN TRỌNG:
 // - App đăng nhập ẩn danh (anonymous auth). Phải bật provider "Anonymous"
 //   trong Firebase Console -> Authentication -> Sign-in method trước khi deploy rules này.
-// - Reads để public (để link chia sẻ #trip=<id> xem được ở chế độ read-only).
-// - Mọi thao tác ghi đều yêu cầu đã đăng nhập + dữ liệu đúng cấu trúc.
+// - Mỗi chuyến đi có ownerId + editors (danh sách uid được sửa).
+// - Ai có id chuyến đi cũng xem được (link xem #trip=<id>), nhưng không liệt kê được chuyến của người khác.
+// - Người có link sửa (#trip=<id>&key=<editKey>) tự thêm mình vào editors qua joinRequests.
+// - Chuyến cũ (chưa có editors) chỉ sửa được sau khi có người "Nhận quyền sở hữu".
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEditorOf(data) {
+      return isSignedIn() && ('editors' in data) && request.auth.uid in data.editors;
+    }
+
+    function tripData(tripId) {
+      return get(/databases/$(database)/documents/trips/$(tripId)).data;
+    }
 
     function isValidTrip(data) {
       return data.name is string
@@ -22,21 +36,55 @@ service cloud.firestore {
         && data.members.size() <= 100
         && data.expenses is list
         && data.expenses.size() <= 2000
-        && (!('advances' in data) || (data.advances is list && data.advances.size() <= 2000));
+        && (!('advances' in data) || (data.advances is list && data.advances.size() <= 2000))
+        && (!('ownerId' in data) || data.ownerId is string)
+        && (!('editors' in data) || (data.editors is list && data.editors.size() <= 50));
     }
 
     match /trips/{tripId} {
-      // Ai có link cũng xem được (chia sẻ read-only)
-      allow read: if true;
+      // Xem một chuyến theo id (link chia sẻ)
+      allow get: if true;
 
-      // Chỉ người đã đăng nhập (kể cả ẩn danh) mới được tạo/sửa/xóa
-      allow create: if request.auth != null
-        && isValidTrip(request.resource.data);
+      // Chỉ liệt kê được chuyến mình là editor (query where editors array-contains uid)
+      allow list: if isSignedIn() && request.auth.uid in resource.data.editors;
 
-      allow update: if request.auth != null
-        && isValidTrip(request.resource.data);
+      allow create: if isSignedIn()
+        && isValidTrip(request.resource.data)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.editors == [request.auth.uid];
 
-      allow delete: if request.auth != null;
+      allow update: if isValidTrip(request.resource.data) && (
+        // (a) editor sửa bình thường; không đổi chủ, chủ luôn nằm trong editors
+        (isEditorOf(resource.data)
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.ownerId in request.resource.data.editors)
+        // (b) nhận quyền sở hữu chuyến cũ chưa có chủ
+        || (isSignedIn()
+          && !('editors' in resource.data)
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.editors == [request.auth.uid])
+        // (c) tham gia bằng link sửa: chỉ thêm chính mình vào editors, đã nộp đúng khóa
+        || (isSignedIn()
+          && ('editors' in resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editors'])
+          && request.resource.data.editors == resource.data.editors.concat([request.auth.uid])
+          && exists(/databases/$(database)/documents/trips/$(tripId)/joinRequests/$(request.auth.uid)))
+      );
+
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Bằng chứng người dùng có khóa sửa. Không ai đọc được.
+      match /joinRequests/{uid} {
+        allow create, update: if isSignedIn()
+          && uid == request.auth.uid
+          && request.resource.data.key is string
+          && request.resource.data.key == get(/databases/$(database)/documents/tripSecrets/$(tripId)).data.editKey;
+      }
+    }
+
+    // Khóa sửa của từng chuyến. Chỉ editor đọc/tạo được, không sửa/xóa.
+    match /tripSecrets/{tripId} {
+      allow get, create: if isEditorOf(tripData(tripId));
     }
 
     // Chặn mọi truy cập khác theo mặc định

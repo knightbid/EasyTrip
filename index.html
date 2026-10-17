@@ -49,21 +49,8 @@
     </script>
 
     <!-- Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@1.50.0/dist/umd/lucide.min.js"></script>
 
-    <!-- Import Map for Modules -->
-    <script type="importmap">
-{
-  "imports": {
-    "@google/genai": "https://esm.sh/@google/genai",
-    "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
-    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.1/",
-    "react": "https://aistudiocdn.com/react@^19.2.1"
-  }
-}
-</script>
 
     <style>
         /* ===== THEME PALETTES ===== */
@@ -432,63 +419,55 @@
 
     <!-- Main Logic Script (Inlined to fix CORS issues) -->
     <script type="module">
-        // We'll load Firebase and Google GenAI dynamically to avoid CORS/import errors
-        // when opening the file locally (file://) or when these libs are not needed.
+        // Firebase and Google GenAI are loaded dynamically so the page still renders
+        // when opened via file:// or when the CDN is unreachable.
         let initializeApp, getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp;
-        let getAuth, signInAnonymously;
+        let query, where, getDoc, setDoc, runTransaction, arrayUnion;
+        let getAuth, signInAnonymously, onAuthStateChanged;
         let GoogleGenAI, Type;
 
         // --- FIREBASE CONFIG ---
         const firebaseConfig = {
-            apiKey: "AIzaSyD5TIQ65Svby10oRmmObxhr0-4h4f8GRN8",
-            authDomain: "sending-5a2ed.firebaseapp.com",
-            projectId: "sending-5a2ed",
-            storageBucket: "sending-5a2ed.firebasestorage.app",
-            messagingSenderId: "277993628196",
-            appId: "1:277993628196:web:37ba3db909a6d5398e6eb1"
+            apiKey: "AIzaSyDKoaSt_CYnc-NNU5YTqh8iYSeZn-53MMA",
+            authDomain: "easytrip-55faf.firebaseapp.com",
+            projectId: "easytrip-55faf",
+            storageBucket: "easytrip-55faf.firebasestorage.app",
+            messagingSenderId: "692521389570",
+            appId: "1:692521389570:web:08a133c46013f7bc03611b"
         };
+        const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.8.0';
 
-        // Initialize Firebase (dynamically)
-        let db;
+        let db = null;
+        let auth = null;
         let firebaseApp = null;
-        (async () => {
-            try {
-                if (typeof initializeApp === 'undefined' || !initializeApp) {
-                    const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
-                    const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-                    const fbAuth = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
-                    initializeApp = fbApp.initializeApp;
-                    getFirestore = fbFire.getFirestore || fbFire.initializeFirestore;
-                    collection = fbFire.collection;
-                    onSnapshot = fbFire.onSnapshot;
-                    addDoc = fbFire.addDoc;
-                    doc = fbFire.doc;
-                    updateDoc = fbFire.updateDoc;
-                    deleteDoc = fbFire.deleteDoc;
-                    serverTimestamp = fbFire.serverTimestamp;
-                    getAuth = fbAuth.getAuth;
-                    signInAnonymously = fbAuth.signInAnonymously;
-                }
+        let firebaseReady = null;
 
-                firebaseApp = initializeApp(firebaseConfig);
-                console.log("Firebase App initialized:", firebaseApp.name);
-                // Use getFirestore if available (modular SDK)
-                db = (getFirestore && typeof getFirestore === 'function') ? getFirestore(firebaseApp) : null;
+        // Loads the SDK and initializes app/db/auth exactly once.
+        const initFirebase = () => {
+            if (firebaseReady) return firebaseReady;
+            firebaseReady = (async () => {
+                try {
+                    const [fbApp, fbFire, fbAuth] = await Promise.all([
+                        import(`${FIREBASE_SDK}/firebase-app.js`),
+                        import(`${FIREBASE_SDK}/firebase-firestore.js`),
+                        import(`${FIREBASE_SDK}/firebase-auth.js`),
+                    ]);
+                    ({ initializeApp } = fbApp);
+                    ({ getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, serverTimestamp,
+                        query, where, getDoc, setDoc, runTransaction, arrayUnion } = fbFire);
+                    ({ getAuth, signInAnonymously, onAuthStateChanged } = fbAuth);
 
-                // Anonymous sign-in so security rules requiring auth keep working
-                if (db && typeof getAuth === 'function' && typeof signInAnonymously === 'function') {
-                    try {
-                        await signInAnonymously(getAuth(firebaseApp));
-                    } catch (authErr) {
-                        console.warn("Anonymous sign-in failed (bật Anonymous provider trong Firebase Console):", authErr);
-                    }
+                    firebaseApp = initializeApp(firebaseConfig);
+                    db = getFirestore(firebaseApp);
+                    auth = getAuth(firebaseApp);
+                } catch (e) {
+                    console.error("Firebase Initialization Error:", e);
+                    const loaderText = document.getElementById('loader-text');
+                    if (loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
                 }
-            } catch (e) {
-                console.error("Firebase Initialization Error:", e);
-                const loaderText = document.getElementById('loader-text');
-                if (loaderText) loaderText.innerText = "Lỗi kết nối. Vui lòng tải lại.";
-            }
-        })();
+            })();
+            return firebaseReady;
+        };
 
         const TRIPS_COLLECTION = 'trips';
 
@@ -750,15 +729,73 @@
 
         const syncScrollLock = () => {
             const overlayOpen = !!document.getElementById('confirm-overlay') || !!document.getElementById('prompt-overlay');
-            const modalOpen = store.expenseModalOpen || store.imageSelectionModalOpen || store.editTripModalOpen || overlayOpen;
+            const modalOpen = store.expenseModalOpen || store.imageSelectionModalOpen || store.editTripModalOpen || store.shareModalOpen || store.advanceModalOpen || overlayOpen;
             document.body.style.overflow = modalOpen ? 'hidden' : '';
+        };
+
+        // --- BALANCE CALCULATION ---
+        const memberWeight = (mem) => (mem && mem.childRate) || 1;
+
+        // Returns { memberId: share } for one expense. Ids of members that no longer exist are ignored.
+        const splitExpense = (expense, members) => {
+            const byId = new Map(members.map(m => [m.id, m]));
+            const ids = (expense.involvedMemberIds && expense.involvedMemberIds.length > 0) ? expense.involvedMemberIds : members.map(m => m.id);
+            const involved = ids.filter(id => byId.has(id));
+            const totalWeight = involved.reduce((sum, id) => sum + memberWeight(byId.get(id)), 0);
+            const shares = {};
+            if (totalWeight <= 0) return shares;
+            involved.forEach(id => { shares[id] = (expense.amount || 0) * memberWeight(byId.get(id)) / totalWeight; });
+            return shares;
+        };
+
+        // An advance is money one member handed to another (the treasurer). Older advances
+        // without a receiver are not counted until someone picks the receiver.
+        const isCountedAdvance = (a, members) => !!(a && a.receiverId && a.receiverId !== a.memberId
+            && members.some(m => m.id === a.memberId) && members.some(m => m.id === a.receiverId));
+
+        // Per-member totals; balance > 0 means the member should get money back. Balances sum to 0.
+        const computeMemberStats = (trip) => {
+            const members = trip.members || [];
+            const stats = new Map(members.map(m => [m.id, { ...m, paid: 0, consumed: 0, advanceGiven: 0, advanceHeld: 0, txCount: 0 }]));
+            (trip.expenses || []).forEach(e => {
+                const payer = stats.get(e.payerId);
+                if (payer) { payer.paid += e.amount || 0; payer.txCount++; }
+                Object.entries(splitExpense(e, members)).forEach(([id, share]) => { stats.get(id).consumed += share; });
+            });
+            (trip.advances || []).forEach(a => {
+                if (!isCountedAdvance(a, members)) return;
+                stats.get(a.memberId).advanceGiven += a.amount || 0;
+                stats.get(a.receiverId).advanceHeld += a.amount || 0;
+            });
+            return [...stats.values()]
+                .map(m => ({ ...m, balance: m.paid + m.advanceGiven - m.consumed - m.advanceHeld }))
+                .sort((a, b) => a.balance - b.balance);
+        };
+
+        // Why a member can't be removed without changing who owes what, or null if removal is safe.
+        const memberRemovalBlocker = (trip, memberId) => {
+            const name = (trip.members || []).find(m => m.id === memberId)?.name || 'Thành viên này';
+            if ((trip.expenses || []).some(e => e.payerId === memberId))
+                return `${name} là người trả của một khoản chi. Hãy đổi người trả hoặc xóa khoản chi đó trước.`;
+            if ((trip.advances || []).some(a => a.memberId === memberId || a.receiverId === memberId))
+                return `${name} có trong một khoản ứng tiền. Hãy xóa khoản ứng đó trước.`;
+            if ((trip.expenses || []).some(e => e.involvedMemberIds && e.involvedMemberIds.length === 1 && e.involvedMemberIds[0] === memberId))
+                return `${name} là người duy nhất dùng một khoản chi. Hãy sửa hoặc xóa khoản chi đó trước.`;
+            return null;
         };
 
         // --- STATE MANAGEMENT ---
         const store = {
-            trips: [],
+            uid: null, // anonymous auth uid of this browser
+            trips: [], // trips this uid can edit
+            externalTrip: null, // trip opened via link that is not in `trips`
+            linkTripId: null, // id from #trip=<id>
+            pendingEditKey: null, // key from #trip=<id>&key=<k>, consumed after sign-in
             activeTripId: null,
-            isReadOnly: false,
+            isReadOnly: false, // derived from canEdit() on every render of a trip
+            shareModalOpen: false,
+            advanceModalOpen: false,
+            advanceForm: { memberId: '', receiverId: '', amount: '' },
             activeTab: 'expenses',
             editingExpenseId: null,
             expenseModalOpen: false,
@@ -783,132 +820,144 @@
 
         // --- FIREBASE OPERATIONS ---
 
+        const SECRETS_COLLECTION = 'tripSecrets';
+
+        const canEdit = (trip) => !!(trip && store.uid && Array.isArray(trip.editors) && trip.editors.includes(store.uid));
+        const isOwner = (trip) => !!(trip && store.uid && trip.ownerId === store.uid);
+        // Trips created before ownership existed have no editors list; the first person to claim one becomes its owner.
+        const isLegacyTrip = (trip) => !!(trip && !trip._localShare && !Array.isArray(trip.editors));
+
+        const getActiveTrip = () => {
+            if (!store.activeTripId) return null;
+            return store.trips.find(t => t.id === store.activeTripId)
+                || (store.externalTrip && store.externalTrip.id === store.activeTripId ? store.externalTrip : null);
+        };
+
+        let unsubMyTrips = null;
+        let unsubLinkTrip = null;
+
+        const subscribeMyTrips = () => {
+            if (unsubMyTrips) { unsubMyTrips(); unsubMyTrips = null; }
+            if (!db || !store.uid) return;
+            const q = query(collection(db, TRIPS_COLLECTION), where('editors', 'array-contains', store.uid));
+            unsubMyTrips = onSnapshot(q, (snapshot) => {
+                const tripsData = [];
+                snapshot.forEach((d) => tripsData.push({ id: d.id, ...d.data() }));
+                store.trips = tripsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                render();
+            }, (error) => {
+                console.error("Firebase Error:", error);
+                render();
+            });
+        };
+
+        const watchLinkTrip = (tripId) => {
+            if (unsubLinkTrip) { unsubLinkTrip(); unsubLinkTrip = null; }
+            if (!db || !tripId) return;
+            unsubLinkTrip = onSnapshot(doc(db, TRIPS_COLLECTION, tripId), (snap) => {
+                store.externalTrip = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+                render();
+            }, (error) => {
+                console.error("Firebase Error:", error);
+                render();
+            });
+        };
+
+        const randomKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+
+        // Returns the trip's edit key, creating it if missing. Only editors can read/create it.
+        const ensureEditKey = async (tripId) => {
+            const ref = doc(db, SECRETS_COLLECTION, tripId);
+            const snap = await getDoc(ref);
+            if (snap.exists() && snap.data().editKey) return snap.data().editKey;
+            const editKey = randomKey();
+            await setDoc(ref, { editKey });
+            return editKey;
+        };
+
+        const joinTripWithKey = async (tripId, key) => {
+            try {
+                await setDoc(doc(db, TRIPS_COLLECTION, tripId, 'joinRequests', store.uid), { key });
+                await updateDoc(doc(db, TRIPS_COLLECTION, tripId), { editors: arrayUnion(store.uid) });
+                showToast('Bạn đã có quyền sửa chuyến đi này', 'success');
+            } catch (e) {
+                console.error("Error joining trip: ", e);
+                showToast('Link sửa không hợp lệ hoặc đã hết hạn.', 'error');
+            }
+        };
+
+        const claimTrip = async (tripId) => {
+            try {
+                await updateDoc(doc(db, TRIPS_COLLECTION, tripId), { ownerId: store.uid, editors: [store.uid] });
+                await ensureEditKey(tripId);
+                showToast('Bạn đã là chủ chuyến đi này', 'success');
+                return true;
+            } catch (e) {
+                console.error("Error claiming trip: ", e);
+                showToast('Không thể nhận quyền sở hữu. ' + (e.message || ''), 'error');
+                return false;
+            }
+        };
+
         const initFirebaseListener = () => {
             const loader = document.getElementById('global-loader');
-            const loaderText = document.getElementById('loader-text');
 
             // Show the page immediately while Firebase loads in background
             checkShareLink();
             render();
             if (loader) loader.classList.add('hidden-loader');
 
-            // Overall timeout: if Firebase hasn't responded in 5s, re-render anyway
-            let firebaseResolved = false;
-            const safetyTimeout = setTimeout(() => {
-                if (!firebaseResolved) {
-                    checkShareLink();
-                    render();
-                }
-            }, 5000);
-
-            const finish = () => {
-                firebaseResolved = true;
-                clearTimeout(safetyTimeout);
-            };
-
-            // Dynamic import Firebase modules when initializing listener and run Firestore logic after ready
-            const ensureFirebase = async () => {
-                if (typeof initializeApp === 'undefined' || !initializeApp) {
-                    try {
-                        const fbApp = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
-                        const fbFire = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-                        const fbAuth = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
-                        initializeApp = fbApp.initializeApp;
-                        // Use getFirestore for browser SDK
-                        getFirestore = fbFire.getFirestore || fbFire.initializeFirestore;
-                        collection = fbFire.collection;
-                        onSnapshot = fbFire.onSnapshot;
-                        addDoc = fbFire.addDoc;
-                        doc = fbFire.doc;
-                        updateDoc = fbFire.updateDoc;
-                        deleteDoc = fbFire.deleteDoc;
-                        serverTimestamp = fbFire.serverTimestamp;
-                        getAuth = fbAuth.getAuth;
-                        signInAnonymously = fbAuth.signInAnonymously;
-                    } catch (err) {
-                        console.warn('Firebase dynamic import failed:', err);
-                        // Leave db undefined and fallback to offline UI
-                    }
-                }
-
-                // If imports succeeded but app/db not initialized yet, initialize here
-                try {
-                    if (!firebaseApp && typeof initializeApp === 'function') {
-                        firebaseApp = initializeApp(firebaseConfig);
-                    }
-                    if (!db && firebaseApp && typeof getFirestore === 'function') {
-                        db = getFirestore(firebaseApp);
-                        console.log('Firebase initialized inside ensureFirebase');
-                    }
-                    if (db && typeof getAuth === 'function' && typeof signInAnonymously === 'function') {
-                        try {
-                            await signInAnonymously(getAuth(firebaseApp));
-                        } catch (authErr) {
-                            console.warn('Anonymous sign-in failed (bật Anonymous provider trong Firebase Console):', authErr);
-                        }
-                    }
-                } catch (err) {
-                    console.warn('Failed to initialize Firebase in ensureFirebase:', err);
-                }
-            };
-
             (async () => {
-                await ensureFirebase();
-                if (!db) {
-                    finish();
-                    return;
-                }
+                await initFirebase();
+                if (!db || !auth) { render(); return; }
 
-                const q = collection(db, TRIPS_COLLECTION);
+                if (store.linkTripId) watchLinkTrip(store.linkTripId);
 
-                onSnapshot(q, (snapshot) => {
-                    finish();
-                    const tripsData = [];
-                    snapshot.forEach((doc) => {
-                        tripsData.push({ id: doc.id, ...doc.data() });
-                    });
-
-                    store.trips = tripsData.sort((a, b) => {
-                        const timeA = a.createdAt?.seconds || 0;
-                        const timeB = b.createdAt?.seconds || 0;
-                        return timeB - timeA;
-                    });
-
-                    checkShareLink();
-                    render();
-                }, (error) => {
-                    finish();
-                    console.error("Firebase Error:", error);
-                    checkShareLink();
+                onAuthStateChanged(auth, async (user) => {
+                    store.uid = user ? user.uid : null;
+                    subscribeMyTrips();
+                    if (store.uid && store.pendingEditKey && store.linkTripId) {
+                        const key = store.pendingEditKey;
+                        store.pendingEditKey = null;
+                        await joinTripWithKey(store.linkTripId, key);
+                    }
                     render();
                 });
+
+                try {
+                    await signInAnonymously(auth);
+                } catch (authErr) {
+                    console.warn('Anonymous sign-in failed (bật Anonymous provider trong Firebase Console):', authErr);
+                }
             })();
         };
 
         const checkShareLink = () => {
             const hash = window.location.hash;
 
-            // Hỗ trợ cả link cũ (nếu muốn giữ tương thích)
+            // Link cũ dạng #share=<base64> – chỉ xem bản chụp dữ liệu trong link
             if (hash.startsWith('#share=')) {
                 try {
-                    const encoded = hash.substring(7);
-                    const sharedTrip = decodeData(encoded);
+                    const sharedTrip = decodeData(hash.substring(7));
                     if (sharedTrip && sharedTrip.id) {
                         store.activeTripId = sharedTrip.id;
-                        store.isReadOnly = true;
-                        if (!store.trips.find(t => t.id === sharedTrip.id)) {
-                            store.trips.push(sharedTrip);
-                        }
+                        store.externalTrip = { ...sharedTrip, _localShare: true };
                     }
                 } catch (e) { console.error(e); }
             }
-            // Link mới – chỉ cần id
+            // #trip=<id> (xem) hoặc #trip=<id>&key=<editKey> (link sửa)
             else if (hash.startsWith('#trip=')) {
-                const tripId = hash.substring(6);
+                const params = new URLSearchParams(hash.substring(1));
+                const tripId = params.get('trip');
                 if (tripId) {
                     store.activeTripId = tripId;
-                    store.isReadOnly = true;
-                    // Không cần push thủ công nữa vì onSnapshot sẽ tự load
+                    store.linkTripId = tripId;
+                    const key = params.get('key');
+                    if (key) {
+                        store.pendingEditKey = key;
+                        // Don't leave the secret in the address bar / history
+                        try { window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}#trip=${tripId}`); } catch (err) { /* ignore */ }
+                    }
                 }
             }
         };
@@ -923,9 +972,12 @@
                     members: [],
                     expenses: [],
                     advances: [],
+                    ownerId: store.uid,
+                    editors: [store.uid],
                     createdAt: serverTimestamp()
                 };
                 const docRef = await addDoc(collection(db, TRIPS_COLLECTION), newTrip);
+                try { await ensureEditKey(docRef.id); } catch (err) { console.warn('Could not create edit key:', err); }
                 store.isCreating = false;
                 store.newTripName = '';
                 store.activeTripId = docRef.id;
@@ -938,16 +990,35 @@
             }
         };
 
-        const updateTripInDB = async (trip) => {
-            if (!trip || !trip.id) return false;
+        // Thrown inside a mutation to cancel it with a user-facing message.
+        class MutationAbort extends Error { }
+
+        // Applies `fn` to the latest server copy of the trip inside a transaction, so concurrent
+        // edits from other people are not overwritten. `fn` returns only the fields to change.
+        const mutateTrip = async (tripId, fn) => {
+            if (!db || !tripId) return false;
             try {
-                const tripRef = doc(db, TRIPS_COLLECTION, trip.id);
-                const { id, ...dataToSave } = trip;
-                await updateDoc(tripRef, dataToSave);
+                await runTransaction(db, async (tx) => {
+                    const ref = doc(db, TRIPS_COLLECTION, tripId);
+                    const snap = await tx.get(ref);
+                    if (!snap.exists()) throw new MutationAbort('Chuyến đi không còn tồn tại.');
+                    const data = snap.data();
+                    const changes = fn({
+                        ...data,
+                        members: data.members || [],
+                        expenses: data.expenses || [],
+                        advances: data.advances || [],
+                    });
+                    tx.update(ref, changes);
+                });
                 return true;
             } catch (e) {
-                console.error("Error updating trip: ", e);
-                showToast("Không thể lưu thay đổi. " + (e.message || ''), 'error');
+                if (e instanceof MutationAbort) {
+                    showToast(e.message, 'error');
+                } else {
+                    console.error("Error updating trip: ", e);
+                    showToast("Không thể lưu thay đổi. " + (e.message || ''), 'error');
+                }
                 return false;
             }
         };
@@ -977,7 +1048,7 @@
                 // Dynamically load Google GenAI SDK to avoid loading it on initial page load
                 if (typeof GoogleGenAI === 'undefined' || !GoogleGenAI) {
                     try {
-                        const gen = await import('https://esm.sh/@google/genai');
+                        const gen = await import('https://esm.sh/@google/genai@2.27.0');
                         GoogleGenAI = gen.GoogleGenAI || gen.default?.GoogleGenAI || gen.default || gen.Google || gen;
                         Type = gen.Type || (gen.default && gen.default.Type) || Type;
                     } catch (err) {
@@ -1050,8 +1121,8 @@
                 </div>`
                 : store.trips.map(trip => `
                     <div class="group bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden border border-gray-200 flex flex-col h-full">
-                        <div class="relative h-40 overflow-hidden cursor-pointer" data-action="select-trip" data-id="${trip.id}">
-                            <img src="${trip.coverImage}" alt="${escapeHtml(trip.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.src=FALLBACK_IMAGE" />
+                        <div class="relative h-40 overflow-hidden cursor-pointer" data-action="select-trip" data-id="${escapeHtml(trip.id)}">
+                            <img src="${escapeHtml(trip.coverImage)}" alt="${escapeHtml(trip.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.src=FALLBACK_IMAGE" />
                             <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                             <h3 class="absolute bottom-3 left-4 right-4 text-xl font-bold text-white shadow-black/50 drop-shadow-md truncate">${escapeHtml(trip.name)}</h3>
                         </div>
@@ -1063,8 +1134,8 @@
                                 <i data-lucide="users" class="w-4 h-4 mr-2"></i> ${trip.members ? trip.members.length : 0} thành viên
                             </div>
                             <div class="mt-auto flex justify-between items-center pt-4 border-t border-gray-100">
-                                <button data-action="select-trip" data-id="${trip.id}" class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1 rounded text-xs font-medium transition-colors">Xem Chi Tiết</button>
-                                <button data-action="delete-trip" data-id="${trip.id}" class="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors z-20"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                <button data-action="select-trip" data-id="${escapeHtml(trip.id)}" class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1 rounded text-xs font-medium transition-colors">Xem Chi Tiết</button>
+                                ${isOwner(trip) ? `<button data-action="delete-trip" data-id="${escapeHtml(trip.id)}" class="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors z-20"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1108,41 +1179,21 @@
         };
 
         const renderTripDetail = () => {
-            const trip = store.trips.find(t => t.id === store.activeTripId);
+            const trip = getActiveTrip();
 if (!trip) {
 return `         <div class="p-8 text-center">             <div class="text-6xl mb-4">🦖</div>                     <div class="text-sm text-gray-500 mt-2">
                 Khủng long đang chạy.             </div>         </div>
     `;
 }
 
+            store.isReadOnly = !canEdit(trip);
+
             const expenses = trip.expenses || [];
             const advances = trip.advances || [];
             const members = trip.members || [];
             const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
 
-            // Calculate Stats
-            const getMemberWeight = (mem) => mem.childRate || 1;
-
-            const memberStats = members.map(m => {
-                let paid = 0;
-                let consumed = 0;
-                let txCount = 0; // Transactions involved/paid
-                expenses.forEach(e => {
-                    if (e.payerId === m.id) { paid += e.amount; txCount++; }
-                    const involved = (e.involvedMemberIds && e.involvedMemberIds.length > 0) ? e.involvedMemberIds : members.map(mem => mem.id);
-                    if (involved.includes(m.id)) {
-                        const totalWeight = involved.reduce((sum, mid) => {
-                            const mem = members.find(member => member.id === mid);
-                            return sum + getMemberWeight(mem);
-                        }, 0);
-                        consumed += e.amount * (getMemberWeight(m) / totalWeight);
-                    }
-                });
-                    // Include advances: money the member put into the common pool (counts as paid)
-                    const advForMember = advances.filter(a => a.memberId === m.id).reduce((s, a) => s + (a.amount || 0), 0);
-                    paid += advForMember;
-                return { ...m, paid, consumed, balance: paid - consumed, txCount };
-            }).sort((a, b) => a.balance - b.balance);
+            const memberStats = computeMemberStats(trip);
 
             const expenseRowHtml = (e) => {
                 const payerMember = members.find(m => m.id === e.payerId);
@@ -1151,14 +1202,14 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 const iconName = e.categoryIcon || 'receipt';
                 return `
                     <div class="flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg border border-gray-100 transition-colors group">
-                        <div class="flex items-start gap-3 flex-1 min-w-0 ${!store.isReadOnly ? 'cursor-pointer' : ''}" data-action="${!store.isReadOnly ? 'edit-expense' : ''}" data-id="${e.id}">
-                            <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600 mt-1 flex-shrink-0"><i data-lucide="${iconName}" class="w-5 h-5"></i></div>
+                        <div class="flex items-start gap-3 flex-1 min-w-0 ${!store.isReadOnly ? 'cursor-pointer' : ''}" data-action="${!store.isReadOnly ? 'edit-expense' : ''}" data-id="${escapeHtml(e.id)}">
+                            <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600 mt-1 flex-shrink-0"><i data-lucide="${escapeHtml(iconName)}" class="w-5 h-5"></i></div>
                             <div class="min-w-0">
                                 <h4 class="font-semibold text-gray-900 break-words">${escapeHtml(e.description)}</h4>
                                 <p class="text-sm text-gray-500"><span class="font-medium text-gray-700">${escapeHtml(payer)}</span> đã trả • <span class="text-gray-400 italic ml-1">${count === members.length ? 'Tất cả' : `Cho ${count} người`}</span></p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3 flex-shrink-0"><span class="font-bold text-gray-900 whitespace-nowrap">${formatCurrency(e.amount)}</span>${!store.isReadOnly ? `<button data-action="edit-expense" data-id="${e.id}" aria-label="Sửa khoản chi" class="text-gray-400 hover:text-indigo-500 p-2"><i data-lucide="edit-2" class="w-4 h-4"></i></button><button data-action="delete-expense" data-id="${e.id}" aria-label="Xóa khoản chi" class="text-gray-400 hover:text-red-500 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}</div>
+                        <div class="flex items-center gap-3 flex-shrink-0"><span class="font-bold text-gray-900 whitespace-nowrap">${formatCurrency(e.amount)}</span>${!store.isReadOnly ? `<button data-action="edit-expense" data-id="${escapeHtml(e.id)}" aria-label="Sửa khoản chi" class="text-gray-400 hover:text-indigo-500 p-2"><i data-lucide="edit-2" class="w-4 h-4"></i></button><button data-action="delete-expense" data-id="${escapeHtml(e.id)}" aria-label="Xóa khoản chi" class="text-gray-400 hover:text-red-500 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}</div>
                     </div>`;
             };
 
@@ -1198,7 +1249,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                             </div>
                         </div>
                         <div class="flex justify-end mt-1.5">
-                            <button data-action="advance-prompt" class="text-xs font-medium text-amber-600 hover:text-amber-700 flex items-center gap-1"><i data-lucide="wallet" class="w-3.5 h-3.5"></i> Ứng tiền trước</button>
+                            <button data-action="open-advance-modal" class="text-xs font-medium text-amber-600 hover:text-amber-700 flex items-center gap-1"><i data-lucide="wallet" class="w-3.5 h-3.5"></i> Ứng tiền trước</button>
                         </div>
                     </div>` : '';
 
@@ -1243,7 +1294,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                         <div class="flex items-center justify-between gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg">
                             <div class="flex items-center gap-2 min-w-0">
                                 <div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-white ${m.balance >= 0 ? 'bg-green-500' : 'bg-red-500'}">
-                                     <i data-lucide="${m.icon || 'user'}" class="w-3.5 h-3.5"></i>
+                                     <i data-lucide="${escapeHtml(m.icon || 'user')}" class="w-3.5 h-3.5"></i>
                                 </div>
                                 <div class="min-w-0">
                                     <div class="font-semibold text-sm leading-tight truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</div>
@@ -1307,32 +1358,28 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                     <tr>
                                         <th class="px-4 py-3 sticky-col-left bg-gray-50 shadow-right min-w-[150px]">Khoản chi</th>
                                         <th class="px-4 py-3 text-right whitespace-nowrap bg-gray-50">Tổng tiền</th>
-                                        ${members.map(m => `<th class="px-4 py-3 text-center whitespace-nowrap min-w-[100px] bg-gray-50 border-l border-gray-200"><div class="flex flex-col items-center gap-1"><i data-lucide="${m.icon || 'user'}" class="w-4 h-4 text-gray-400"></i><span>${m.name}</span></div></th>`).join('')}
+                                        ${members.map(m => `<th class="px-4 py-3 text-center whitespace-nowrap min-w-[100px] bg-gray-50 border-l border-gray-200"><div class="flex flex-col items-center gap-1"><i data-lucide="${escapeHtml(m.icon || 'user')}" class="w-4 h-4 text-gray-400"></i><span>${escapeHtml(m.name)}</span></div></th>`).join('')}
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100">
                                     ${filteredExpenses.length === 0 ? `<tr><td colspan="${members.length + 2}" class="px-6 py-8 text-center text-gray-400 italic">Không tìm thấy khoản chi nào.</td></tr>` :
                         filteredExpenses.map(e => {
-                            const involved = e.involvedMemberIds && e.involvedMemberIds.length > 0 ? e.involvedMemberIds : members.map(m => m.id);
                             const icon = e.categoryIcon || 'receipt';
                             return `
                                             <tr class="hover:bg-gray-50 transition-colors">
-                                                <td class="px-4 py-3 font-medium text-gray-900 sticky-col-left bg-white shadow-right min-w-[160px] max-w-[260px] align-top" title="${e.description}">
+                                                <td class="px-4 py-3 font-medium text-gray-900 sticky-col-left bg-white shadow-right min-w-[160px] max-w-[260px] align-top" title="${escapeHtml(e.description)}">
                                                     <div class="flex items-start gap-2">
-                                                        <i data-lucide="${icon}" class="w-3 h-3 mt-0.5 text-indigo-500 flex-shrink-0"></i>
-                                                        <span class="break-words">${e.description}</span>
+                                                        <i data-lucide="${escapeHtml(icon)}" class="w-3 h-3 mt-0.5 text-indigo-500 flex-shrink-0"></i>
+                                                        <span class="break-words">${escapeHtml(e.description)}</span>
                                                     </div>
                                                     <div class="text-[10px] text-gray-400 font-normal mt-0.5 ml-5">${new Date(e.date).toLocaleDateString('vi-VN')}</div>
                                                 </td>
                                                 <td class="px-4 py-3 text-right text-indigo-600 font-medium whitespace-nowrap">${formatCurrency(e.amount)}</td>
                                                 ${(() => {
-                                const totalWeight = involved.reduce((sum, mid) => {
-                                    const mem = members.find(member => member.id === mid);
-                                    return sum + (mem.childRate || 1);
-                                }, 0);
+                                const shares = splitExpense(e, members);
                                 return members.map(m => {
-                                    const isInvolved = involved.includes(m.id);
-                                    const splitAmount = isInvolved ? e.amount * ((m.childRate || 1) / totalWeight) : 0;
+                                    const isInvolved = m.id in shares;
+                                    const splitAmount = shares[m.id] || 0;
                                     return `
                                                         <td class="px-4 py-3 text-center border-l border-gray-100">
                                                             ${isInvolved
@@ -1359,8 +1406,8 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div class="bg-blue-50 p-4 rounded-xl border border-blue-200"><p class="text-blue-600 text-xs font-bold uppercase">Tổng Chi Phí</p><p class="text-2xl font-bold text-blue-900 mt-1">${formatCurrency(totalSpent)}</p></div>
                             <div class="bg-purple-50 p-4 rounded-xl border border-purple-200"><p class="text-purple-600 text-xs font-bold uppercase">Bình Quân/Người</p><p class="text-2xl font-bold text-purple-900 mt-1">${formatCurrency(members.length ? totalSpent / members.length : 0)}</p></div>
-                            <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><p class="text-amber-600 text-xs font-bold uppercase">Top Chi Tiền</p><p class="text-xl font-bold text-amber-900 mt-1 truncate">${topSpender && topSpender.paid > 0 ? topSpender.name : '---'}</p></div>
-                            <div class="bg-green-50 p-4 rounded-xl border border-green-200"><p class="text-green-600 text-xs font-bold uppercase">Top Giao Dịch</p><p class="text-xl font-bold text-green-900 mt-1 truncate">${mostActive && mostActive.txCount > 0 ? mostActive.name : '---'}</p></div>
+                            <div class="bg-amber-50 p-4 rounded-xl border border-amber-200"><p class="text-amber-600 text-xs font-bold uppercase">Top Chi Tiền</p><p class="text-xl font-bold text-amber-900 mt-1 truncate">${topSpender && topSpender.paid > 0 ? escapeHtml(topSpender.name) : '---'}</p></div>
+                            <div class="bg-green-50 p-4 rounded-xl border border-green-200"><p class="text-green-600 text-xs font-bold uppercase">Top Giao Dịch</p><p class="text-xl font-bold text-green-900 mt-1 truncate">${mostActive && mostActive.txCount > 0 ? escapeHtml(mostActive.name) : '---'}</p></div>
                         </div>
 
                         ${matrixHtml}
@@ -1371,12 +1418,42 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                 <thead class="text-xs text-gray-500 uppercase bg-gray-50"><tr><th class="px-6 py-3">Thành viên</th><th class="px-6 py-3 text-right">Đã Chi</th><th class="px-6 py-3 text-right">Sử Dụng</th><th class="px-6 py-3 text-right">Chênh Lệch</th></tr></thead>
                                 <tbody>${memberStats.map(m => `
                                     <tr class="bg-white border-b border-gray-100 hover:bg-gray-50">
-                                        <td class="px-6 py-4 font-medium text-gray-900 flex items-center gap-2"><i data-lucide="${m.icon || 'user'}" class="w-4 h-4 text-gray-400"></i> ${m.name}</td>
+                                        <td class="px-6 py-4 font-medium text-gray-900 flex items-center gap-2"><i data-lucide="${escapeHtml(m.icon || 'user')}" class="w-4 h-4 text-gray-400"></i> ${escapeHtml(m.name)}</td>
                                         <td class="px-6 py-4 text-right text-indigo-600">${formatCurrency(m.paid)}</td>
                                         <td class="px-6 py-4 text-right text-pink-600">${formatCurrency(m.consumed)}</td>
                                         <td class="px-6 py-4 text-right font-bold ${m.balance >= 0 ? 'text-green-600' : 'text-red-600'}">${m.balance > 0 ? '+' : ''}${formatCurrency(m.balance)}</td>
                                     </tr>`).join('')}</tbody>
                             </table></div>
+                        </div>
+                    </div>`;
+            };
+
+            const memberName = (id) => members.find(m => m.id === id)?.name || '?';
+            const advancesListHtml = () => {
+                if (advances.length === 0) return '';
+                return `
+                    <div class="mt-6">
+                        <h3 class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><i data-lucide="wallet" class="w-4 h-4"></i> Các khoản ứng tiền</h3>
+                        <div class="divide-y divide-gray-100 border border-gray-200 rounded-lg bg-white">
+                            ${advances.map(a => {
+                                const counted = isCountedAdvance(a, members);
+                                const receiverPicker = !counted && !store.isReadOnly
+                                    ? `<select data-advance-receiver="${escapeHtml(a.id)}" aria-label="Chọn người nhận" class="rounded-md border border-amber-300 text-xs p-1"><option value="">Chọn người nhận...</option>${members.filter(m => m.id !== a.memberId).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join('')}</select>`
+                                    : '';
+                                return `
+                                <div class="px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+                                    <div class="flex items-center gap-2 min-w-0 flex-wrap">
+                                        <span class="font-medium truncate">${escapeHtml(memberName(a.memberId))}</span>
+                                        <i data-lucide="arrow-right" class="w-4 h-4 text-gray-400 flex-shrink-0"></i>
+                                        ${counted ? `<span class="font-medium truncate">${escapeHtml(memberName(a.receiverId))}</span>` : `<span class="text-xs text-amber-600 font-medium">Chưa chọn người nhận — chưa tính vào công nợ</span>`}
+                                        ${receiverPicker}
+                                    </div>
+                                    <div class="flex items-center gap-2 flex-shrink-0">
+                                        <span class="font-bold text-gray-800 whitespace-nowrap">${formatCurrency(a.amount || 0)}</span>
+                                        ${!store.isReadOnly ? `<button data-action="delete-advance" data-id="${escapeHtml(a.id)}" aria-label="Xóa khoản ứng" class="text-gray-400 hover:text-red-500 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('')}
                         </div>
                     </div>`;
             };
@@ -1393,7 +1470,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                      ${MEMBER_ICONS.map(icon => `
                                          <button type="button" data-action="select-member-icon" data-value="${icon}" 
                                              class="p-2 rounded-full border ${store.newMemberIcon === icon ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'} transition-all">
-                                             <i data-lucide="${icon}" class="w-5 h-5"></i>
+                                             <i data-lucide="${escapeHtml(icon)}" class="w-5 h-5"></i>
                                          </button>
                                      `).join('')}
                                  </div>
@@ -1429,34 +1506,35 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         ${members.map(m => {
-                            const advForMember = advances.filter(a => a.memberId === m.id).reduce((s, a) => s + (a.amount || 0), 0);
+                            const st = memberStats.find(x => x.id === m.id) || {};
                             return `
                         <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-indigo-600">
-                                    <i data-lucide="${m.icon || 'user'}" class="w-5 h-5"></i>
+                                    <i data-lucide="${escapeHtml(m.icon || 'user')}" class="w-5 h-5"></i>
                                 </div>
                                 <div class="flex flex-col">
-                                    <span class="font-medium">${m.name}</span>
+                                    <span class="font-medium">${escapeHtml(m.name)}</span>
                                     ${m.childRate ? `<span class="text-xs text-amber-600 font-medium">Trẻ em (1/${m.childRate === 0.5 ? '2' : '4'})</span>` : ''}
-                                    <span class="text-xs text-gray-500">Ứng trước: ${formatCurrency(advForMember)}</span>
+                                    ${st.advanceGiven || st.advanceHeld ? `<span class="text-xs text-gray-500">${st.advanceGiven ? `Đã ứng: ${formatCurrency(st.advanceGiven)}` : ''}${st.advanceGiven && st.advanceHeld ? ' · ' : ''}${st.advanceHeld ? `Đang giữ: ${formatCurrency(st.advanceHeld)}` : ''}</span>` : ''}
                                 </div>
                             </div>
                                 <div class="flex items-center gap-2">
                                 ${store.editingChildMemberId === m.id ? `
-                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="" class="px-2 py-1 rounded text-xs font-medium border ${!m.childRate ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">Lớn</button>
-                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="0.5" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.5 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/2</button>
-                                    <button data-action="save-child-rate" data-id="${m.id}" data-value="0.25" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.25 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/4</button>
+                                    <button data-action="save-child-rate" data-id="${escapeHtml(m.id)}" data-value="" class="px-2 py-1 rounded text-xs font-medium border ${!m.childRate ? 'bg-indigo-100 border-indigo-500 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">Lớn</button>
+                                    <button data-action="save-child-rate" data-id="${escapeHtml(m.id)}" data-value="0.5" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.5 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/2</button>
+                                    <button data-action="save-child-rate" data-id="${escapeHtml(m.id)}" data-value="0.25" class="px-2 py-1 rounded text-xs font-medium border ${m.childRate === 0.25 ? 'bg-amber-100 border-amber-500 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-100'}">1/4</button>
                                     <button data-action="cancel-edit-child" class="text-gray-400 hover:text-gray-600 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
                                 ` : `
-                                    ${!store.isReadOnly ? `<button data-action="edit-child-rate" data-id="${m.id}" class="text-gray-400 hover:text-indigo-500 p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Sửa loại thành viên"><i data-lucide="edit-2" class="w-4 h-4"></i></button>` : ''}
-                                    ${!store.isReadOnly ? `<button data-action="add-advance" data-id="${m.id}" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-md text-sm">Ứng tiền</button>` : ''}
-                                    ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${m.id}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+                                    ${!store.isReadOnly ? `<button data-action="edit-child-rate" data-id="${escapeHtml(m.id)}" class="text-gray-400 hover:text-indigo-500 p-1 rounded-full hover:bg-indigo-50 transition-colors" title="Sửa loại thành viên"><i data-lucide="edit-2" class="w-4 h-4"></i></button>` : ''}
+                                    ${!store.isReadOnly ? `<button data-action="open-advance-modal" data-id="${escapeHtml(m.id)}" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-md text-sm">Ứng tiền</button>` : ''}
+                                    ${!store.isReadOnly ? `<button data-action="remove-member" data-id="${escapeHtml(m.id)}" class="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
                                 `}
                             </div>
                         </div>`;
                         }).join('')}
                     </div>
+                    ${advancesListHtml()}
                 </div>`;
 
             let content = '';
@@ -1469,12 +1547,12 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
 
             return `
                 <div class="container mx-auto px-4 py-6 max-w-4xl animate-fade-in-down">
-                    ${store.isReadOnly ? `<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between"><div class="flex items-center gap-2 text-blue-700"><i data-lucide="lock" class="w-4 h-4"></i><span class="text-sm font-medium">View Only Mode.</span></div><button data-action="enable-editing" class="bg-white text-blue-600 border border-blue-200 px-3 py-1 rounded text-xs font-medium hover:bg-blue-50 flex items-center gap-1"><i data-lucide="unlock" class="w-3 h-3"></i> Chỉnh sửa</button></div>` : ''}
+                    ${store.isReadOnly ? `<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between gap-3"><div class="flex items-center gap-2 text-blue-700"><i data-lucide="lock" class="w-4 h-4 flex-shrink-0"></i><span class="text-sm font-medium">${isLegacyTrip(trip) ? 'Chuyến đi này chưa có chủ.' : 'Bạn đang xem. Xin link sửa từ người tạo để chỉnh sửa.'}</span></div>${isLegacyTrip(trip) && store.uid ? `<button data-action="claim-trip" class="bg-white text-blue-600 border border-blue-200 px-3 py-1 rounded text-xs font-medium hover:bg-blue-50 flex items-center gap-1 whitespace-nowrap"><i data-lucide="key-round" class="w-3 h-3"></i> Nhận quyền sở hữu</button>` : ''}</div>` : ''}
                     <div class="mb-6">
                         <button data-action="back-to-list" class="text-gray-500 hover:text-indigo-600 flex items-center mb-4"><i data-lucide="arrow-left" class="w-4 h-4 mr-1"></i> Quay lại</button>
                         <div class="bg-white rounded-2xl shadow-md overflow-hidden relative group">
                             <div class="h-48 w-full relative">
-                                <img src="${trip.coverImage}" class="w-full h-full object-cover" onerror="this.src=FALLBACK_IMAGE" />
+                                <img src="${escapeHtml(trip.coverImage)}" class="w-full h-full object-cover" onerror="this.src=FALLBACK_IMAGE" />
                                 <div class="absolute inset-0 bg-black/30 flex items-end p-6">
                                     <div class="min-w-0"><h1 class="text-3xl font-bold text-white mb-1 break-words">${escapeHtml(trip.name)}</h1><p class="text-white/90 text-sm flex items-center gap-2"><i data-lucide="users" class="w-4 h-4"></i> ${members.length} thành viên • Tổng chi: <span class="font-bold text-green-300">${formatCurrency(totalSpent)}</span></p></div>
                                 </div>
@@ -1498,7 +1576,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
 
         const renderExpenseModal = () => {
             if (!store.expenseModalOpen) return '';
-            const trip = store.trips.find(t => t.id === store.activeTripId);
+            const trip = getActiveTrip();
             if (!trip) return '';
             const members = trip.members || [];
             const involvedIds = store.expenseForm.involvedIds.length > 0 ? store.expenseForm.involvedIds : members.map(m => m.id);
@@ -1522,7 +1600,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                             ${[50000, 100000, 200000, 500000, 1000000].map(v => `<button type="button" data-action="quick-amount" data-value="${v}" class="px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-indigo-50 hover:text-indigo-600">${v >= 1000000 ? (v / 1000000) + 'tr' : (v / 1000) + 'k'}</button>`).join('')}
                                         </div>
                                     </div>
-                                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Người trả</label><select id="ex-payer" class="w-full rounded-md border border-gray-300 p-2"><option value="">-- Chọn người trả --</option>${members.map(m => `<option value="${m.id}" ${m.id === store.expenseForm.payerId ? 'selected' : ''}>${m.name}</option>`).join('')}</select></div>
+                                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Người trả</label><select id="ex-payer" class="w-full rounded-md border border-gray-300 p-2"><option value="">-- Chọn người trả --</option>${members.map(m => `<option value="${m.id}" ${m.id === store.expenseForm.payerId ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}</select></div>
                                     
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-2">Loại chi tiêu</label>
@@ -1537,7 +1615,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                                         </div>
                                     </div>
 
-                                    <div><div class="flex justify-between items-center mb-2"><label class="block text-sm font-medium text-gray-700">Thành viên tham gia</label><button data-action="toggle-select-all" class="text-xs text-indigo-600 font-medium hover:underline">${involvedIds.length === members.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button></div><div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">${members.map(m => { const isSelected = involvedIds.includes(m.id); return `<button type="button" data-action="toggle-involved" data-id="${m.id}" class="px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${isSelected ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200'}">${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''} <span class="flex items-center gap-1"><i data-lucide="${m.icon || 'user'}" class="w-3 h-3"></i> ${m.name}</span>${m.childRate ? `<span class="text-[10px] text-amber-500 ml-0.5">(1/${m.childRate === 0.5 ? '2' : '4'})</span>` : ''}</button>`; }).join('')}</div></div>
+                                    <div><div class="flex justify-between items-center mb-2"><label class="block text-sm font-medium text-gray-700">Thành viên tham gia</label><button data-action="toggle-select-all" class="text-xs text-indigo-600 font-medium hover:underline">${involvedIds.length === members.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</button></div><div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">${members.map(m => { const isSelected = involvedIds.includes(m.id); return `<button type="button" data-action="toggle-involved" data-id="${escapeHtml(m.id)}" class="px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${isSelected ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200'}">${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''} <span class="flex items-center gap-1"><i data-lucide="${escapeHtml(m.icon || 'user')}" class="w-3 h-3"></i> ${escapeHtml(m.name)}</span>${m.childRate ? `<span class="text-[10px] text-amber-500 ml-0.5">(1/${m.childRate === 0.5 ? '2' : '4'})</span>` : ''}</button>`; }).join('')}</div></div>
                                 </div>
                             </div>
                             <p id="ex-form-error" class="hidden px-4 sm:px-6 pt-3 text-sm text-red-600 font-medium"></p>
@@ -1585,7 +1663,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
 
         const renderEditTripModal = () => {
             if (!store.editTripModalOpen) return '';
-            const trip = store.trips.find(t => t.id === store.activeTripId);
+            const trip = getActiveTrip();
             if (!trip) return '';
             const startDate = store.editTripForm.startDate ? String(store.editTripForm.startDate).slice(0, 10) : '';
             return `
@@ -1617,6 +1695,77 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 </div>`;
         };
 
+        const renderAdvanceModal = () => {
+            if (!store.advanceModalOpen) return '';
+            const trip = getActiveTrip();
+            if (!trip) return '';
+            const members = trip.members || [];
+            const f = store.advanceForm;
+            const options = (selected, excludeId) => members.filter(m => m.id !== excludeId)
+                .map(m => `<option value="${escapeHtml(m.id)}" ${m.id === selected ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('');
+            return `
+                <div class="fixed inset-0 z-[70] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="advance-title">
+                    <div class="flex items-center justify-center min-h-screen px-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" data-action="close-advance-modal"></div>
+                        <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in-up">
+                            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                                <h3 id="advance-title" class="text-lg font-bold text-gray-900">Ứng tiền</h3>
+                                <button data-action="close-advance-modal" aria-label="Đóng" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-6 h-6"></i></button>
+                            </div>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="adv-giver" class="block text-sm font-medium text-gray-700 mb-1">Người đưa tiền</label>
+                                    <select id="adv-giver" class="w-full rounded-md border border-gray-300 p-2"><option value="">Chọn người...</option>${options(f.memberId)}</select>
+                                </div>
+                                <div>
+                                    <label for="adv-receiver" class="block text-sm font-medium text-gray-700 mb-1">Người nhận (thủ quỹ)</label>
+                                    <select id="adv-receiver" class="w-full rounded-md border border-gray-300 p-2"><option value="">Chọn người...</option>${options(f.receiverId, f.memberId)}</select>
+                                </div>
+                                <div>
+                                    <label for="adv-amount" class="block text-sm font-medium text-gray-700 mb-1">Số tiền</label>
+                                    <input type="text" id="adv-amount" inputmode="numeric" value="${escapeHtml(f.amount)}" placeholder="VD: 500k hoặc 500000" class="w-full rounded-md border border-gray-300 p-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                </div>
+                                <p class="text-xs text-gray-500">Người đưa được tính là đã góp tiền; người nhận đang giữ khoản tiền này cho cả nhóm.</p>
+                                <p id="adv-error" class="hidden text-sm text-red-600 font-medium"></p>
+                            </div>
+                            <div class="flex justify-end gap-2 mt-6">
+                                <button data-action="close-advance-modal" class="box-btn-ghost px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">Hủy</button>
+                                <button data-action="save-advance" class="box-btn px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium">Lưu</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        };
+
+        const renderShareModal = () => {
+            if (!store.shareModalOpen) return '';
+            const trip = getActiveTrip();
+            if (!trip) return '';
+            return `
+                <div class="fixed inset-0 z-[70] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="share-title">
+                    <div class="flex items-center justify-center min-h-screen px-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" data-action="close-share"></div>
+                        <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in-up">
+                            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                                <h3 id="share-title" class="text-lg font-bold text-gray-900">Chia sẻ chuyến đi</h3>
+                                <button data-action="close-share" aria-label="Đóng" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-6 h-6"></i></button>
+                            </div>
+                            <div class="space-y-3">
+                                <button data-action="copy-view-link" class="box-btn-ghost w-full flex items-start gap-3 p-3 border border-gray-300 rounded-md text-left hover:bg-gray-50">
+                                    <i data-lucide="eye" class="w-5 h-5 mt-0.5 text-indigo-600 flex-shrink-0"></i>
+                                    <span><span class="block font-medium text-gray-900">Sao chép link xem</span><span class="block text-xs text-gray-500">Người nhận chỉ xem được, không sửa được.</span></span>
+                                </button>
+                                ${canEdit(trip) ? `
+                                <button data-action="copy-edit-link" class="box-btn-ghost w-full flex items-start gap-3 p-3 border border-gray-300 rounded-md text-left hover:bg-gray-50">
+                                    <i data-lucide="pencil" class="w-5 h-5 mt-0.5 text-amber-600 flex-shrink-0"></i>
+                                    <span><span class="block font-medium text-gray-900">Sao chép link sửa</span><span class="block text-xs text-gray-500">Ai mở link này sẽ được quyền thêm, sửa khoản chi. Chỉ gửi cho người trong nhóm.</span></span>
+                                </button>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        };
+
         const render = () => {
             const active = document.activeElement;
             const activeId = active ? active.id : null;
@@ -1629,6 +1778,8 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
             let modals = renderExpenseModal();
             modals += renderImageSelector();
             modals += renderEditTripModal();
+            modals += renderShareModal();
+            modals += renderAdvanceModal();
             modalContainer.innerHTML = modals;
 
             if (window.lucide) window.lucide.createIcons();
@@ -1682,11 +1833,13 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
             const action = target.dataset.action;
             const id = target.dataset.id;
 
-            if (action === 'select-trip') { store.activeTripId = id; store.isReadOnly = false; store.activeTab = 'expenses'; store.expenseSearchText = ''; store.reportSearchText = ''; render(); }
+            if (action === 'select-trip') { store.activeTripId = id; store.activeTab = 'expenses'; store.expenseSearchText = ''; store.reportSearchText = ''; render(); }
 
             if (action === 'back-to-list') {
                 store.activeTripId = null;
-                store.isReadOnly = false;
+                store.linkTripId = null;
+                store.externalTrip = null;
+                if (unsubLinkTrip) { unsubLinkTrip(); unsubLinkTrip = null; }
                 store.expenseSearchText = '';
                 store.reportSearchText = '';
                 if (window.location.protocol !== 'file:') {
@@ -1708,42 +1861,90 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                     await deleteTripFromDB(id);
                 }
             }
-            if (action === 'share-trip') {
-                const trip = store.trips.find(t => t.id === store.activeTripId);
+            if (action === 'share-trip') { store.shareModalOpen = true; render(); }
+            if (action === 'close-share') { store.shareModalOpen = false; render(); }
+            if (action === 'copy-view-link' || action === 'copy-edit-link') {
+                const trip = getActiveTrip();
+                if (!trip) return;
                 const baseUrl = window.location.href.split('#')[0];
-                const shareUrl = `${baseUrl}#trip=${trip.id}`;
+                let shareUrl = `${baseUrl}#trip=${trip.id}`;
+                if (action === 'copy-edit-link') {
+                    setBtnLoading(target, true, 'Đang tạo link...');
+                    try {
+                        shareUrl += `&key=${await ensureEditKey(trip.id)}`;
+                    } catch (err) {
+                        console.error(err);
+                        setBtnLoading(target, false);
+                        showToast('Không thể tạo link sửa. ' + (err.message || ''), 'error');
+                        return;
+                    }
+                }
                 try { await navigator.clipboard.writeText(shareUrl); } catch (err) { console.warn(err); }
-                showToast('Đã sao chép link chia sẻ!', 'success');
-            } if (action === 'enable-editing') { store.isReadOnly = false; render(); }
+                store.shareModalOpen = false;
+                render();
+                showToast(action === 'copy-edit-link' ? 'Đã sao chép link sửa!' : 'Đã sao chép link xem!', 'success');
+            }
+            if (action === 'claim-trip') {
+                const trip = getActiveTrip();
+                if (!trip || !isLegacyTrip(trip)) return;
+                if (!(await showConfirm('Nhận quyền sở hữu chuyến đi này? Sau đó chỉ bạn và người có link sửa mới chỉnh sửa được.', 'Nhận quyền sở hữu'))) return;
+                await claimTrip(trip.id);
+            }
 
             if (action === 'remove-member') {
-                if (!(await showConfirm("Xóa thành viên này? Các khoản chi liên quan sẽ được tính lại.", "Xóa thành viên"))) return;
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                const remainingMembers = trip.members.filter(m => m.id !== id);
-                const updatedExpenses = trip.expenses.map(e => {
-                    const newInvolved = e.involvedMemberIds ? e.involvedMemberIds.filter(mid => mid !== id) : [];
-                    let newPayerId = e.payerId;
-                    if (e.payerId === id) { newPayerId = remainingMembers.length > 0 ? remainingMembers[0].id : ''; }
-                    return { ...e, payerId: newPayerId, involvedMemberIds: newInvolved };
+                const trip = getActiveTrip();
+                if (!trip) return;
+                const reason = memberRemovalBlocker(trip, id);
+                if (reason) { showToast(reason, 'error'); return; }
+                if (!(await showConfirm("Xóa thành viên này?", "Xóa thành viên"))) return;
+                const ok = await mutateTrip(store.activeTripId, (t) => {
+                    // Re-check against the latest data in case someone else edited meanwhile
+                    const latestReason = memberRemovalBlocker(t, id);
+                    if (latestReason) throw new MutationAbort(latestReason);
+                    return {
+                        members: t.members.filter(m => m.id !== id),
+                        expenses: t.expenses.map(e => (e.involvedMemberIds && e.involvedMemberIds.length > 0)
+                            ? { ...e, involvedMemberIds: e.involvedMemberIds.filter(mid => mid !== id) }
+                            : e)
+                    };
                 });
-                const ok = await updateTripInDB({ ...trip, members: remainingMembers, expenses: updatedExpenses });
                 if (ok) showToast('Đã xóa thành viên', 'success');
             }
 
-            if (action === 'add-advance') {
-                const memberId = target.dataset.id;
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                if (!trip) return;
-                const memberName = trip.members.find(m => m.id === memberId)?.name || 'thành viên';
-                const raw = await showPrompt('Nhập số tiền ứng (VNĐ) cho ' + memberName + ':', '', 'VD: 500k hoặc 500000');
-                if (raw === null) return;
-                const amount = parseAmount(raw);
-                if (amount <= 0) { showToast('Vui lòng nhập số tiền hợp lệ.', 'error'); return; }
-                const advance = { id: generateId(), memberId, amount, date: new Date().toISOString(), note: '' };
-                const updatedAdv = [...(trip.advances || [])];
-                updatedAdv.unshift(advance);
-                const ok = await updateTripInDB({ ...trip, advances: updatedAdv });
-                if (ok) showToast('Đã thêm khoản ứng tiền', 'success');
+            if (action === 'open-advance-modal') {
+                store.advanceForm = { memberId: target.dataset.id || '', receiverId: '', amount: '' };
+                store.advanceModalOpen = true;
+                render();
+                setTimeout(() => document.getElementById(store.advanceForm.memberId ? 'adv-receiver' : 'adv-giver')?.focus(), 50);
+            }
+            if (action === 'close-advance-modal') { store.advanceModalOpen = false; render(); }
+            if (action === 'save-advance') {
+                const errEl = document.getElementById('adv-error');
+                const { memberId, receiverId } = store.advanceForm;
+                const amount = parseAmount(document.getElementById('adv-amount')?.value);
+                const problems = [];
+                if (!memberId) problems.push('người đưa');
+                if (!receiverId || receiverId === memberId) problems.push('người nhận khác người đưa');
+                if (amount <= 0) problems.push('số tiền hợp lệ');
+                if (problems.length) {
+                    if (errEl) { errEl.textContent = 'Vui lòng bổ sung: ' + problems.join(', ') + '.'; errEl.classList.remove('hidden'); }
+                    return;
+                }
+                setBtnLoading(target, true, 'Đang lưu...');
+                const advance = { id: generateId(), memberId, receiverId, amount, date: new Date().toISOString(), note: '' };
+                const ok = await mutateTrip(store.activeTripId, (t) => ({ advances: [advance, ...t.advances] }));
+                if (ok) {
+                    store.advanceModalOpen = false;
+                    render();
+                    showToast('Đã thêm khoản ứng tiền', 'success');
+                } else {
+                    setBtnLoading(target, false);
+                }
+            }
+            if (action === 'delete-advance') {
+                if (!(await showConfirm('Xóa khoản ứng tiền này?', 'Xóa khoản ứng'))) return;
+                const ok = await mutateTrip(store.activeTripId, (t) => ({ advances: t.advances.filter(a => a.id !== id) }));
+                if (ok) showToast('Đã xóa khoản ứng', 'success');
             }
 
             if (action === 'select-member-icon') {
@@ -1771,17 +1972,17 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 const memberId = target.dataset.id;
                 const val = target.dataset.value;
                 const newRate = val === '' ? null : parseFloat(val);
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                const updatedMembers = trip.members.map(m => m.id === memberId ? { ...m, childRate: newRate } : m);
                 store.editingChildMemberId = null;
-                const ok = await updateTripInDB({ ...trip, members: updatedMembers });
+                const ok = await mutateTrip(store.activeTripId, (t) => ({
+                    members: t.members.map(m => m.id === memberId ? { ...m, childRate: newRate } : m)
+                }));
                 if (ok) showToast('Đã cập nhật loại thành viên', 'success');
             }
 
-            if (action === 'open-expense-modal') { store.expenseModalOpen = true; store.editingExpenseId = null; const trip = store.trips.find(t => t.id === store.activeTripId); store.expenseForm = { desc: '', amount: '', payerId: '', involvedIds: trip.members.map(m => m.id), icon: 'receipt' }; render(); setTimeout(() => document.getElementById('ex-desc')?.focus(), 50); }
+            if (action === 'open-expense-modal') { store.expenseModalOpen = true; store.editingExpenseId = null; const trip = getActiveTrip(); store.expenseForm = { desc: '', amount: '', payerId: '', involvedIds: trip.members.map(m => m.id), icon: 'receipt' }; render(); setTimeout(() => document.getElementById('ex-desc')?.focus(), 50); }
             if (action === 'close-modal') { store.expenseModalOpen = false; render(); }
             if (action === 'edit-expense') {
-                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const trip = getActiveTrip();
                 const expense = trip.expenses.find(e => e.id === id);
                 store.expenseModalOpen = true;
                 store.editingExpenseId = id;
@@ -1794,10 +1995,10 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 };
                 render();
             }
-            if (action === 'delete-expense') { if (await showConfirm("Xóa khoản chi này?", "Xóa khoản chi")) { const trip = store.trips.find(t => t.id === store.activeTripId); const updatedExpenses = trip.expenses.filter(e => e.id !== id); const ok = await updateTripInDB({ ...trip, expenses: updatedExpenses }); if (ok) showToast('Đã xóa khoản chi', 'success'); } }
+            if (action === 'delete-expense') { if (await showConfirm("Xóa khoản chi này?", "Xóa khoản chi")) { const ok = await mutateTrip(store.activeTripId, (t) => ({ expenses: t.expenses.filter(e => e.id !== id) })); if (ok) showToast('Đã xóa khoản chi', 'success'); } }
 
             if (action === 'toggle-involved') { const id = target.dataset.id; if (store.expenseForm.involvedIds.includes(id)) store.expenseForm.involvedIds = store.expenseForm.involvedIds.filter(i => i !== id); else store.expenseForm.involvedIds.push(id); render(); }
-            if (action === 'toggle-select-all') { const trip = store.trips.find(t => t.id === store.activeTripId); store.expenseForm.involvedIds = store.expenseForm.involvedIds.length === trip.members.length ? [] : trip.members.map(m => m.id); render(); }
+            if (action === 'toggle-select-all') { const trip = getActiveTrip(); store.expenseForm.involvedIds = store.expenseForm.involvedIds.length === trip.members.length ? [] : trip.members.map(m => m.id); render(); }
 
             if (action === 'select-icon') {
                 store.expenseForm.icon = target.dataset.value;
@@ -1810,7 +2011,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
             }
 
             if (action === 'open-edit-trip') {
-                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const trip = getActiveTrip();
                 if (!trip) return;
                 store.editTripModalOpen = true;
                 store.editTripForm = { name: trip.name || '', startDate: trip.startDate || new Date().toISOString() };
@@ -1831,9 +2032,9 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 }
                 if (errEl) errEl.classList.add('hidden');
                 setBtnLoading(target, true, 'Đang lưu...');
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                const updated = { ...trip, name, startDate: date ? new Date(date + 'T00:00:00').toISOString() : trip.startDate };
-                const ok = await updateTripInDB(updated);
+                const ok = await mutateTrip(store.activeTripId, (t) => ({
+                    name, startDate: date ? new Date(date + 'T00:00:00').toISOString() : t.startDate
+                }));
                 if (ok) {
                     store.editTripModalOpen = false;
                     render();
@@ -1871,39 +2072,25 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
 
                 setBtnLoading(target, true, 'Đang lưu...');
 
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                // Special handling: if description starts with 'Ứng tiền', create one expense per involved member
-                let updatedExpenses = [...trip.expenses];
-                if (desc.startsWith('Ứng tiền')) {
-                    const perMember = store.expenseForm.involvedIds.map(mid => {
-                        return {
-                            id: generateId(),
-                            description: `Ứng tiền — ${trip.members.find(m=>m.id===mid)?.name || ''}`,
-                            amount: amount,
-                            payerId: mid,
-                            date: new Date().toISOString(),
-                            involvedMemberIds: store.expenseForm.involvedIds,
-                            categoryIcon: store.expenseForm.icon
-                        };
-                    });
-                    updatedExpenses = [...perMember, ...updatedExpenses];
-                } else {
-                    const expenseData = {
-                        id: store.editingExpenseId || generateId(),
-                        description: desc,
-                        amount,
-                        payerId,
-                        date: new Date().toISOString(),
-                        involvedMemberIds: store.expenseForm.involvedIds,
-                        categoryIcon: store.expenseForm.icon
+                const expenseData = {
+                    id: store.editingExpenseId || generateId(),
+                    description: desc,
+                    amount,
+                    payerId,
+                    date: new Date().toISOString(),
+                    involvedMemberIds: store.expenseForm.involvedIds,
+                    categoryIcon: store.expenseForm.icon
+                };
+                const editingId = store.editingExpenseId;
+                const wasEditing = !!editingId;
+                const ok = await mutateTrip(store.activeTripId, (t) => {
+                    if (editingId && !t.expenses.some(e => e.id === editingId)) throw new MutationAbort('Khoản chi này vừa bị người khác xóa.');
+                    return {
+                        expenses: editingId
+                            ? t.expenses.map(e => e.id === editingId ? expenseData : e)
+                            : [expenseData, ...t.expenses]
                     };
-
-                    if (store.editingExpenseId) updatedExpenses = updatedExpenses.map(e => e.id === store.editingExpenseId ? expenseData : e);
-                    else updatedExpenses.unshift(expenseData);
-                }
-
-                const wasEditing = !!store.editingExpenseId;
-                const ok = await updateTripInDB({ ...trip, expenses: updatedExpenses });
+                });
                 if (ok) {
                     store.expenseModalOpen = false;
                     store.editingExpenseId = null;
@@ -1918,7 +2105,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 const text = document.getElementById('quick-add-input').value.trim();
                 if (!text) return;
                 store.isAnalyzing = true; render();
-                const trip = store.trips.find(t => t.id === store.activeTripId);
+                const trip = getActiveTrip();
                 const result = await parseExpenseWithAI(text, trip.members.map(m => m.name));
                 store.isAnalyzing = false;
                 if (result) {
@@ -1932,22 +2119,6 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                         icon: result.categoryIcon || 'receipt'
                     };
                 }
-                render();
-            }
-
-            if (action === 'advance-prompt') {
-                const trip = store.trips.find(t => t.id === store.activeTripId);
-                if (!trip) return;
-                // Open expense modal prefilled for an advance. User can pick payer in modal.
-                store.expenseModalOpen = true;
-                store.editingExpenseId = null;
-                store.expenseForm = {
-                    desc: 'Ứng tiền — ',
-                    amount: '',
-                    payerId: trip.members[0]?.id || '',
-                    involvedIds: trip.members.map(m => m.id),
-                    icon: 'receipt'
-                };
                 render();
             }
 
@@ -1972,8 +2143,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 if (!img) { showToast('Vui lòng chọn ảnh.', 'error'); return; }
                 setBtnLoading(target, true, 'Đang lưu...');
                 if (store.updateCoverMode && store.activeTripId) {
-                    const trip = store.trips.find(t => t.id === store.activeTripId);
-                    const ok = await updateTripInDB({ ...trip, coverImage: img });
+                    const ok = await mutateTrip(store.activeTripId, () => ({ coverImage: img }));
                     if (!ok) { setBtnLoading(target, false); return; }
                     showToast('Đã cập nhật ảnh bìa', 'success');
                 }
@@ -1983,6 +2153,23 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
         });
 
         document.addEventListener('change', async (e) => {
+            if (e.target.id === 'adv-giver') {
+                store.advanceForm.memberId = e.target.value;
+                if (store.advanceForm.receiverId === e.target.value) store.advanceForm.receiverId = '';
+                render();
+                return;
+            }
+            if (e.target.id === 'adv-receiver') { store.advanceForm.receiverId = e.target.value; return; }
+            if (e.target.dataset && e.target.dataset.advanceReceiver) {
+                const advanceId = e.target.dataset.advanceReceiver;
+                const receiverId = e.target.value;
+                if (!receiverId) return;
+                const ok = await mutateTrip(store.activeTripId, (t) => ({
+                    advances: t.advances.map(a => a.id === advanceId && a.memberId !== receiverId ? { ...a, receiverId } : a)
+                }));
+                if (ok) showToast('Đã cập nhật người nhận', 'success');
+                return;
+            }
             if (e.target.id === 'custom-image-upload') {
                 const file = e.target.files[0];
                 if (file) {
@@ -2035,13 +2222,12 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 if (errEl) errEl.classList.add('hidden');
                 const btn = e.target.querySelector('button[type="submit"]');
                 setBtnLoading(btn, true, 'Đang thêm...');
-                const trip = store.trips.find(t => t.id === store.activeTripId);
                 store.newMemberName = ''; input.value = '';
                 const newMember = { id: generateId(), name, icon: store.newMemberIcon || 'user', childRate: store.newChildRate };
                 // Reset icon and child rate after adding
                 store.newMemberIcon = 'user';
                 store.newChildRate = null;
-                const ok = await updateTripInDB({ ...trip, members: [...trip.members, newMember] });
+                const ok = await mutateTrip(store.activeTripId, (t) => ({ members: [...t.members, newMember] }));
                 if (ok) showToast('Đã thêm thành viên', 'success');
                 else setBtnLoading(btn, false);
             }
@@ -2060,6 +2246,7 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 updateAmountHint(e.target.value);
             }
             if (e.target.id === 'ex-payer') store.expenseForm.payerId = e.target.value;
+            if (e.target.id === 'adv-amount') store.advanceForm.amount = e.target.value;
         });
 
         document.addEventListener('keydown', (e) => {
@@ -2067,6 +2254,8 @@ return `         <div class="p-8 text-center">             <div class="text-6xl 
                 if (store.expenseModalOpen) { store.expenseModalOpen = false; render(); }
                 else if (store.imageSelectionModalOpen) { store.imageSelectionModalOpen = false; render(); }
                 else if (store.editTripModalOpen) { store.editTripModalOpen = false; render(); }
+                else if (store.shareModalOpen) { store.shareModalOpen = false; render(); }
+                else if (store.advanceModalOpen) { store.advanceModalOpen = false; render(); }
             }
             if (e.key === 'Tab') {
                 const container = document.querySelector('#modal-container [role="dialog"]') || document.getElementById('confirm-overlay') || document.getElementById('prompt-overlay');
